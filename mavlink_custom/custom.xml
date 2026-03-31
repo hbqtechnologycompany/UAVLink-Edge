@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<mavlink>
+  <version>3</version>
+  <dialect>0</dialect>
+
+  <messages>
+    <!-- Session Token Heartbeat - ID 42000 -->
+    <message id="42000" name="SESSION_HEARTBEAT">
+      <description>Session token heartbeat for IP:Port synchronization</description>
+      <field type="uint8_t[32]" name="token">Session token (32 bytes binary)</field>
+      <field type="uint32_t" name="expires_at">Session expiration timestamp (Unix time)</field>
+      <field type="uint16_t" name="sequence">Sequence number for tracking</field>
+      <field type="uint8_t" name="pixhawk_connected">Pixhawk connection status (0=disconnected, 1=connected)</field>
+    </message>
+  </messages>
+</mavlink>

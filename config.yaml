@@ -1,0 +1,39 @@
+log:
+    level: info
+    verbose: false
+    timestamp_format: time
+    # Có muốn tắt log của thư viện bên thứ ba không
+    server_connection_only: false
+    show_web_interaction_logs: true
+    show_packet_stats: false
+auth:
+    enabled: true
+    host: 45.117.171.237
+    port: 5770
+    uuid: 00000028-0000-0000-0000-000000000028
+    shared_secret: drone-fleet-shared-secret-auth-key-2025
+    keepalive_interval: 30
+    session_heartbeat_frequency: 1.0
+network:
+    local_listen_port: 14540
+    target_host: 10.8.0.1
+    target_port: 14550
+    protocol: udp
+    connection_type: serial
+    serial_port: /dev/ttyAMA0
+    serial_baud: 57600
+    # Chế độ kết nối: "4g_only", "wifi_only", "prefer_4g"
+    mode: prefer_4g
+    # Giây chờ trước khi fallback sang WiFi (mặc định 300 = 5 phút)
+    fallback_delay: 300
+ethernet:
+    interface: ""
+    local_ip: ""
+    broadcast_ip: ""
+    pixhawk_ip: ""
+    auto_setup: false
+#     subnet: "24"
+#     allow_missing_pixhawk: true
+#     pixhawk_connection_timeout: 30
+web:
+    port: 8080
