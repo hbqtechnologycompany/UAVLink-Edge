@@ -14,7 +14,6 @@
 *   **Cơ chế Fail-over Thông Minh**: Tự động chuyển đổi giữa 4G và WiFi. Ưu tiên 4G, chỉ fallback sang WiFi khi mất sóng và tự động quay lại khi có tín hiệu.
 *   **Policy-Based Routing (PBR)**: Tách biệt hoàn toàn traffic ứng dụng và traffic hệ thống. Giữ kết nối SSH qua WiFi luôn ổn định kể cả khi UAVLink-Edge đang sử dụng 4G.
 *   **Bảo Mật Xác Thực**: Thực hiện xác thực thiết bị với Fleet Server qua kênh TCP bảo mật trước khi bắt đầu chuyển tiếp dữ liệu.
-*   **Tối Ưu Hóa Băng Thông**: Giảm thiểu overhead bằng cách loại bỏ các lớp tunnel không cần thiết, đảm bảo độ trễ thấp nhất cho điều khiển thời gian thực.
 
 ---
 
