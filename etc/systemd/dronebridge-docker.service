@@ -1,0 +1,21 @@
+# Đặt tại: /etc/systemd/system/dronebridge-docker.service
+# Cài bởi: docker/setup.sh (thay @DOCKER_DIR@ / @INSTALL_DIR@)
+[Unit]
+Description=DroneBridge Docker (compose)
+After=docker.service network-online.target dronebridge-lcd-i2c-setup.service dronebridge-4g-init.service
+Requires=docker.service
+Wants=network-online.target dronebridge-4g-init.service dronebridge-netmon.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=@DOCKER_DIR@
+Environment=DRONEBRIDGE_DIR=@INSTALL_DIR@
+# Chỉ dừng binary Go native — KHÔNG stop 4g-init/netmon (4G + routing chạy trên host)
+ExecStartPre=-/usr/bin/systemctl stop dronebridge.service
+ExecStart=@DOCKER_DIR@/compose.sh up -d dronebridge
+ExecStop=@DOCKER_DIR@/compose.sh stop dronebridge
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

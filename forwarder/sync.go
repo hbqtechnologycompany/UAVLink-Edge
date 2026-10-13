@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"UAVLink-Edge/logger"
+	"DroneBridge/logger"
 )
 
 // SyncManager handles multi-drone synchronization using filesystem signals

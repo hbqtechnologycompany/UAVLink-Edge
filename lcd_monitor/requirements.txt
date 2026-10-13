@@ -1,0 +1,1 @@
+# Pi: sudo apt install -y python3-pillow python3-smbus2 i2c-tools

@@ -1,16 +1,16 @@
 # 4G Module & Network Monitor Knowledge Base
 
 ## Tổng quan
-Module `Module_4G` tại `Pi_CM5_UAVLink-EdgeService` chịu trách nhiệm duy trì kết nối mạng an toàn và ổn định nhất cho hệ thống UAVLink-Edge (truyền tải MAVLink/Video từ máy bay CM5 đến trạm điều khiển qua 4G/WiFi).
+Module `Module_4G` tại `Pi_CM5_DroneBridgeService` chịu trách nhiệm duy trì kết nối mạng an toàn và ổn định nhất cho hệ thống DroneBridge (truyền tải MAVLink/Video từ máy bay CM5 đến trạm điều khiển qua 4G/WiFi).
 
-Kiến trúc định tuyến đang sử dụng là **Policy-Based Routing (PBR)**, giúp tách biệt hoàn toàn đường truyền của UAVLink-Edge so với đường truyền mặc định của hệ điều hành.
+Kiến trúc định tuyến đang sử dụng là **Policy-Based Routing (PBR)**, giúp tách biệt hoàn toàn đường truyền của DroneBridge so với đường truyền mặc định của hệ điều hành.
 
 ---
 
 ## 1. Cơ chế hoạt động (Policy-Based Routing)
-Thay vì sử dụng metric để xếp hạng giao diện mạng (như truyền thống), hệ thống tạo ra một bảng định tuyến riêng biệt (`table 100 UAVLink-Edge`).
+Thay vì sử dụng metric để xếp hạng giao diện mạng (như truyền thống), hệ thống tạo ra một bảng định tuyến riêng biệt (`table 100 dronebridge`).
 
-*   **Tất cả các gói tin (traffic)** phát sinh từ ứng dụng UAVLink-Edge đều mang nhãn (mark) là `0x01` (FWMARK).
+*   **Tất cả các gói tin (traffic)** phát sinh từ ứng dụng DroneBridge đều mang nhãn (mark) là `0x01` (FWMARK).
 *   **IP Rule:** Hệ thống được cấu hình rule: nếu bắt được gói tin có mark `0x01`, hãy tra cứu `table 100` để ưu tiên định tuyến.
 *   **System Default (Main Table):** WiFi (`wlan0`) luôn được coi là Default Route cho hệ thống (để các công cụ như SSH vào CM5 hoạt động mượt mà mà không lo bị kẹt nếu 4G rớt mạng).
 
@@ -26,7 +26,7 @@ File `connection_manager.py` là bộ não theo dõi và quyết định:
 ---
 
 ## 3. Quy hoạch mới: Quản lý Restart Hardware thông minh (Bảo vệ Phần Cứng)
-Phiên bản trước tồn tại lỗi restart modem QMI (`UAVLink-Edge-4g-init.service`) liên tục mỗi 5 phút khi mất 4G. Gây tình trạng "spam" log hệ thống, sinh nhiệt lượng lớn, sốc điện từ, hao mòn IC điều khiển modem. 
+Phiên bản trước tồn tại lỗi restart modem QMI (`dronebridge-4g-init.service`) liên tục mỗi 5 phút khi mất 4G. Gây tình trạng "spam" log hệ thống, sinh nhiệt lượng lớn, sốc điện từ, hao mòn IC điều khiển modem. 
 
 Quy hoạch mới bổ sung **3 Tính năng an toàn phần cứng**:
 
@@ -44,7 +44,7 @@ Nếu Drone hiện đang được Fallback an toàn trên sóng WiFi (`wlan_ok =
 
 ### C. Cơ chế Giảm Tải Log (Quiet / Anti-Spam)
 Thay vì spam syslog 20.000 dòng `WARNING 4G down` mỗi 12 giờ, hệ thống được tinh chỉnh để:
-*   Bỏ qua việc xuất tin nhắn ra màn hình đối với các cảnh báo thông thường (chỉ ghi lúc rớt mạng thực sự tại ngưỡng hoặc ghi đè chẵn chục `[10, 30, 60]`). Dễ dàng debug bằng lệnh `journalctl -u UAVLink-Edge-netmon.service`.
+*   Bỏ qua việc xuất tin nhắn ra màn hình đối với các cảnh báo thông thường (chỉ ghi lúc rớt mạng thực sự tại ngưỡng hoặc ghi đè chẵn chục `[10, 30, 60]`). Dễ dàng debug bằng lệnh `journalctl -u dronebridge-netmon.service`.
 *   Tự động reset lại toàn bộ các bộ đếm về `0` (Clear Counters/Backoff) khi hệ thống xác định Modem QMI đã hoạt động trở lại thành công và lấy được IP.
 
 ---
@@ -55,21 +55,21 @@ Nếu bạn đang SSH trong CM5 và muốn kiểm tra 4G/WiFi:
 
 1. **Xem Trạng thái Tóm Tắt Nhanh**:
    ```bash
-   sudo /usr/bin/python3 /opt/UAVLink-Edge/Module_4G/connection_manager.py status
+   sudo /usr/bin/python3 /opt/dronebridge/Module_4G/connection_manager.py status
    ```
 
 2. **Xem Trạng Thái Dịch Vụ**:
    ```bash
-   sudo systemctl status UAVLink-Edge-netmon.service
-   sudo systemctl status UAVLink-Edge-4g-init.service
+   sudo systemctl status dronebridge-netmon.service
+   sudo systemctl status dronebridge-4g-init.service
    ```
 
 3. **In Live Log (Realtime)**:
    ```bash
-   journalctl -u UAVLink-Edge-netmon.service -f
+   journalctl -u dronebridge-netmon.service -f
    ```
 
 4. **Kích hoạt Lại Modem Thủ Công**:
    ```bash
-   sudo systemctl restart UAVLink-Edge-4g-init.service
+   sudo systemctl restart dronebridge-4g-init.service
    ```

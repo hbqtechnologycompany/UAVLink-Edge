@@ -41,6 +41,9 @@ const (
 	MsgRegisterResponse  uint8 = 0xA2 // 162
 	MsgRegisterAck       uint8 = 0xA3 // 163
 
+	// VPN Provisioning
+	MsgVPNProvisionRequest uint8 = 0xB0 // Drone -> Router
+	MsgVPNProvisionAck     uint8 = 0xB1 // Router -> Drone
 )
 
 // Result Codes
@@ -59,6 +62,14 @@ const (
 	ErrInvalidToken        = 0x07 // Session not found or invalid token
 	ErrInternalError       = 0x05
 	ErrNotAuthenticated    = 0x10
+
+	// VPN Error Codes (0xB*)
+	ErrVPNParseFailed    = 0xB0
+	ErrVPNSessionInvalid = 0xB1
+	ErrVPNBackendFailed  = 0xB2
+	ErrVPNWgFailed       = 0xB3
+	ErrVPNDroneNotFound  = 0xB4
+	ErrVPNIpPoolEmpty    = 0xB5
 )
 
 // AuthChallenge represents AUTH_CHALLENGE message from server
@@ -171,9 +182,12 @@ type APIKeyDeleteAck struct {
 // REGISTRATION PROTOCOL STRUCTURES (NEW)
 // ============================================================================
 
-// RegisterInit represents REGISTER_INIT packet (UUID only)
+// RegisterInit represents REGISTER_INIT packet.
+// Legacy v1: UUID only. v2 adds optional vehicle_type + model trailer.
 type RegisterInit struct {
-	DroneUUID string
+	DroneUUID   string
+	VehicleType uint8
+	Model       string
 }
 
 // RegisterChallenge represents REGISTER_CHALLENGE packet (from server)
@@ -554,22 +568,36 @@ func ParseSessionRefreshAck(data []byte) (*SessionRefreshAck, error) {
 // REGISTRATION PROTOCOL SERIALIZATION (NEW)
 // ============================================================================
 
-// SerializeRegisterInit creates REGISTER_INIT packet
-// Format: [TYPE:1][UUID_LEN:2][UUID:var]
+// SerializeRegisterInit creates REGISTER_INIT packet.
+// v1: [TYPE:1][UUID_LEN:2 LE][UUID]
+// v2: [TYPE:1][UUID_LEN:2 LE][UUID][VehicleType:1][ModelLen:1][Model:0..32]
+// Trailer is sent only when vehicle_type != 0 or model != "".
 func SerializeRegisterInit(init *RegisterInit) []byte {
 	uuidBytes := []byte(init.DroneUUID)
-	packet := make([]byte, 0, 1+2+len(uuidBytes))
+	model := init.Model
+	if len(model) > MaxRegisterModelLen {
+		model = model[:MaxRegisterModelLen]
+	}
+	modelBytes := []byte(model)
 
-	// Message type
+	capacity := 1 + 2 + len(uuidBytes)
+	if init.VehicleType != 0 || len(modelBytes) > 0 {
+		capacity += 1 + 1 + len(modelBytes)
+	}
+	packet := make([]byte, 0, capacity)
+
 	packet = append(packet, MsgRegisterInit)
 
-	// UUID length (2 bytes)
 	buf := make([]byte, 2)
 	binary.LittleEndian.PutUint16(buf, uint16(len(uuidBytes)))
 	packet = append(packet, buf...)
-
-	// UUID
 	packet = append(packet, uuidBytes...)
+
+	if init.VehicleType != 0 || len(modelBytes) > 0 {
+		packet = append(packet, init.VehicleType)
+		packet = append(packet, uint8(len(modelBytes)))
+		packet = append(packet, modelBytes...)
+	}
 
 	return packet
 }
@@ -1062,3 +1090,96 @@ func ParseAPIKeyDeleteAck(data []byte) (*APIKeyDeleteAck, error) {
 	return ack, nil
 }
 
+// ============================================================================
+// VPN PROVISIONING PROTOCOL (0xB0 / 0xB1)
+// ============================================================================
+
+type VPNProvisionRequest struct {
+	DroneUUID    string
+	SessionToken string
+	WGPublicKey  string
+}
+
+type VPNProvisionAck struct {
+	Result          byte
+	ErrorCode       byte
+	AssignedIP      string
+	ServerPublicKey string
+	ServerEndpoint  string
+}
+
+func SerializeVPNProvisionRequest(req *VPNProvisionRequest) []byte {
+	uuidBytes := []byte(req.DroneUUID)
+	tokenBytes := []byte(req.SessionToken)
+	keyBytes := []byte(req.WGPublicKey)
+	// packet length: type(1) + uuidLen(2) + uuid + tokenLen(2) + token + keyLen(2) + key
+	packet := make([]byte, 0, 1+2+len(uuidBytes)+2+len(tokenBytes)+2+len(keyBytes))
+
+	packet = append(packet, MsgVPNProvisionRequest)
+
+	buf := make([]byte, 2)
+
+	// Serializing DroneUUID
+	binary.LittleEndian.PutUint16(buf, uint16(len(uuidBytes)))
+	packet = append(packet, buf...)
+	packet = append(packet, uuidBytes...)
+
+	// Serializing SessionToken
+	binary.LittleEndian.PutUint16(buf, uint16(len(tokenBytes)))
+	packet = append(packet, buf...)
+	packet = append(packet, tokenBytes...)
+
+	// Serializing WGPublicKey
+	binary.LittleEndian.PutUint16(buf, uint16(len(keyBytes)))
+	packet = append(packet, buf...)
+	packet = append(packet, keyBytes...)
+
+	return packet
+}
+
+func ParseVPNProvisionAck(data []byte) (*VPNProvisionAck, error) {
+    if len(data) < 2 {
+        return nil, fmt.Errorf("vpn ack packet too short")
+    }
+    if data[0] != MsgVPNProvisionAck {
+        return nil, fmt.Errorf("invalid msg type: 0x%02x (expected 0xB1)", data[0])
+    }
+
+    ack := &VPNProvisionAck{}
+    ack.Result = data[1]
+    offset := 2
+
+    if ack.Result != ResultSuccess {
+        if len(data) > offset {
+            ack.ErrorCode = data[offset]
+        }
+        return ack, nil
+    }
+
+    readStr := func() (string, error) {
+        if len(data) < offset+2 {
+            return "", fmt.Errorf("unexpected end of packet")
+        }
+        length := int(binary.LittleEndian.Uint16(data[offset : offset+2]))
+        offset += 2
+        if len(data) < offset+length {
+            return "", fmt.Errorf("string length exceeds packet size")
+        }
+        s := string(data[offset : offset+length])
+        offset += length
+        return s, nil
+    }
+
+	var err error
+	if ack.AssignedIP, err = readStr(); err != nil {
+		return nil, fmt.Errorf("read AssignedIP: %w", err)
+	}
+	if ack.ServerPublicKey, err = readStr(); err != nil {
+		return nil, fmt.Errorf("read ServerPublicKey: %w", err)
+	}
+	if ack.ServerEndpoint, err = readStr(); err != nil {
+		return nil, fmt.Errorf("read ServerEndpoint: %w", err)
+	}
+
+    return ack, nil
+}

@@ -1,0 +1,77 @@
+# DroneBridge runtime — Go binary + camera stack (ARM64 Raspberry Pi CM5)
+# Build: docker compose -f docker/docker-compose.yml build dronebridge
+# syntax=docker/dockerfile:1
+#
+# OpenCV: apt python3-opencv on bookworm+rpi is 4.6.0 — cv2.aruco SEGFAULT on ARM64.
+# ArUco (landing_detection_mode=aruco) needs opencv-contrib pip >= 4.7; pin 4.10 to match Pi host.
+
+ARG TARGETARCH=arm64
+ARG OPENCV_CONTRIB_PIP_VERSION=4.10.0.84
+
+FROM --platform=linux/${TARGETARCH} golang:1.24-bookworm AS gobuild
+WORKDIR /build
+COPY go.mod go.sum ./
+COPY vendor ./vendor
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
+    go build -mod=vendor -ldflags="-s -w" -o /out/dronebridge .
+
+FROM --platform=linux/${TARGETARCH} debian:bookworm-slim AS runtime
+
+ARG OPENCV_CONTRIB_PIP_VERSION
+ENV OPENCV_CONTRIB_PIP_VERSION=${OPENCV_CONTRIB_PIP_VERSION}
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Pi camera stack (picamera2, rpicam-apps) lives in archive.raspberrypi.com
+# NOTE: do NOT install python3-opencv from apt (4.6.0 breaks ArUco on ARM64).
+RUN apt-get update -qq \
+    && apt-get install -y -qq --no-install-recommends \
+        ca-certificates curl gnupg \
+    && curl -fsSL https://archive.raspberrypi.com/debian/raspberrypi.gpg.key \
+        | gpg --dearmor -o /usr/share/keyrings/raspberrypi-archive-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] http://archive.raspberrypi.com/debian/ bookworm main" \
+        > /etc/apt/sources.list.d/raspi.list \
+    && apt-get update -qq \
+    && apt-get install -y -qq --no-install-recommends \
+        python3 \
+        python3-pip \
+        python3-yaml \
+        python3-numpy \
+        python3-picamera2 \
+        rpicam-apps \
+        gstreamer1.0-tools \
+        gstreamer1.0-plugins-base \
+        gstreamer1.0-plugins-good \
+        gstreamer1.0-plugins-bad \
+        gstreamer1.0-plugins-ugly \
+        gstreamer1.0-libav \
+        gstreamer1.0-rtsp \
+        libx264-164 \
+        iproute2 \
+        wireguard-tools \
+        iputils-ping \
+        curl \
+        ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --break-system-packages --no-cache-dir \
+        "opencv-contrib-python-headless==${OPENCV_CONTRIB_PIP_VERSION}"
+
+COPY docker/verify-opencv-aruco.py /usr/local/bin/verify-opencv-aruco.py
+RUN chmod +x /usr/local/bin/verify-opencv-aruco.py \
+    && python3 /usr/local/bin/verify-opencv-aruco.py
+
+WORKDIR /opt/dronebridge
+
+COPY --from=gobuild /out/dronebridge /opt/dronebridge/dronebridge
+COPY Find_landing /opt/dronebridge/Find_landing/
+COPY Module_4G /opt/dronebridge/Module_4G/
+COPY config.yaml /opt/dronebridge/config.yaml.example
+
+COPY docker/entrypoint-dronebridge.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh /opt/dronebridge/dronebridge
+
+EXPOSE 8080 14550/udp
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/opt/dronebridge/dronebridge", "--config", "/opt/dronebridge/config.yaml"]

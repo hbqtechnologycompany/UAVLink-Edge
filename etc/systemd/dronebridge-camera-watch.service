@@ -1,0 +1,14 @@
+[Unit]
+Description=DroneBridge — auto apply camera boot overlay on config change
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/dronebridge
+ExecStart=/opt/dronebridge/install/camera/watch_camera_overlay.sh
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

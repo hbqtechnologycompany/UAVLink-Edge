@@ -1,0 +1,70 @@
+# DroneBridge — Docker Compose (Pi CM5)
+#
+# Cài + chạy một lệnh (trên Pi):
+#   cd docker && sudo bash setup.sh
+#
+# Thủ công:
+#   sudo bash install_docker.sh
+#   sudo bash compose.sh build dronebridge
+#   sudo bash compose.sh up -d dronebridge
+
+services:
+  dronebridge:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dronebridge
+    image: dronebridge:local
+    container_name: dronebridge
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    pid: host
+    stdin_open: false
+    tty: false
+    volumes:
+      - ${DRONEBRIDGE_DIR:-/opt/dronebridge}:/opt/dronebridge
+      - /run/dronebridge:/run/dronebridge
+      - /run/udev:/run/udev:ro
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    environment:
+      TZ: ${TZ:-UTC}
+    env_file:
+      - path: .env
+        required: false
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/api/camera/detect >/dev/null || exit 1"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 90s
+
+  # Optional: git pull + host install loop (profile bootstrap)
+  drone-bootstrap:
+    profiles: ["bootstrap"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: drone-bootstrap:local
+    container_name: drone-bootstrap
+    restart: unless-stopped
+    privileged: true
+    pid: host
+    network_mode: host
+    volumes:
+      - ${HOST_REPO_PATH:-/opt/Pi_CM5_DroneBridgeService}:${HOST_REPO_PATH:-/opt/Pi_CM5_DroneBridgeService}
+    environment:
+      HOST_REPO_PATH: ${HOST_REPO_PATH:-/opt/Pi_CM5_DroneBridgeService}
+      REPO_URL: ${REPO_URL:-}
+      REPO_BRANCH: ${REPO_BRANCH:-main}
+      DRONE_RUN_USER: ${DRONE_RUN_USER:-cm5drone6425}
+      PULL_INTERVAL: ${PULL_INTERVAL:-300}
+      HEALTH_INTERVAL: ${HEALTH_INTERVAL:-60}
+      MAX_INSTALL_RETRIES: ${MAX_INSTALL_RETRIES:-3}
+      DRONEBRIDGE_AUTO_REBOOT: ${DRONEBRIDGE_AUTO_REBOOT:-1}
+    env_file:
+      - path: .env
+        required: false

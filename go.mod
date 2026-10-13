@@ -1,10 +1,12 @@
-module UAVLink-Edge
+module DroneBridge
 
-go 1.24.6
+go 1.24.4
 
 require (
 	github.com/bluenviron/gomavlib/v3 v3.2.1
 	github.com/vishvananda/netlink v1.3.1
+	golang.zx2c4.com/wireguard v0.0.0-20250521234502-f333402bd9cb
+	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
 	gopkg.in/yaml.v3 v3.0.1
 )
 

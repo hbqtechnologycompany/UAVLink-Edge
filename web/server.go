@@ -11,8 +11,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"regexp"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,9 +21,10 @@ import (
 	"github.com/bluenviron/gomavlib/v3"
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
 
-	"UAVLink-Edge/auth"
-	"UAVLink-Edge/config"
-	"UAVLink-Edge/metrics"
+	"DroneBridge/auth"
+	"DroneBridge/camera"
+	"DroneBridge/config"
+	"DroneBridge/metrics"
 )
 
 //go:embed static/*
@@ -36,6 +37,143 @@ var xmlOnce sync.Once
 // Mutex to prevent concurrent 4G module access
 var moduleMutex sync.Mutex
 
+var projectRoot = detectProjectRoot()
+
+func detectProjectRoot() string {
+	candidates := []string{}
+	if cwd, err := os.Getwd(); err == nil && cwd != "" {
+		candidates = append(candidates, cwd)
+	}
+	candidates = append(candidates, "/home/pi/Run_serverGo", "/opt/dronebridge")
+
+	for _, root := range candidates {
+		if _, err := os.Stat(filepath.Join(root, "Find_landing")); err == nil {
+			return root
+		}
+	}
+
+	if len(candidates) > 0 {
+		return candidates[0]
+	}
+	return "."
+}
+
+func projectPath(parts ...string) string {
+	all := append([]string{projectRoot}, parts...)
+	return filepath.Join(all...)
+}
+
+func defaultCameraConfig() map[string]interface{} {
+	if cfg, err := loadAppConfig(); err == nil {
+		return cameraConfigToUI(cfg, 0)
+	}
+
+	return map[string]interface{}{
+		"camera_id":         0,
+		"size":              []int{640, 480},
+		"framerate":         30,
+		"format":            "BGR888",
+		"mediamtx_host":     "45.117.171.237",
+		"mediamtx_port":     8554,
+		"bitrate":           5000,
+		"overlay_enabled":   true,
+		"detection_enabled": true,
+		"keyframe_interval": 30,
+		"preset":            "veryfast",
+		"tune":              "zerolatency",
+		"brightness":        0,
+		"contrast":          1,
+		"sharpness":         1.5,
+		"saturation":        1.0,
+		"exposure_time":     0,
+	}
+}
+
+func extractJSONPayload(raw []byte) ([]byte, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return nil, fmt.Errorf("empty output")
+	}
+
+	if json.Valid([]byte(trimmed)) {
+		return []byte(trimmed), nil
+	}
+
+	for i := len(trimmed) - 1; i >= 0; i-- {
+		if trimmed[i] != '[' && trimmed[i] != '{' {
+			continue
+		}
+		candidate := strings.TrimSpace(trimmed[i:])
+		if json.Valid([]byte(candidate)) {
+			return []byte(candidate), nil
+		}
+	}
+
+	return nil, fmt.Errorf("no valid JSON payload found")
+}
+
+func signalDBMToBars(dbm float64) int {
+	switch {
+	case dbm >= -75:
+		return 5
+	case dbm >= -85:
+		return 4
+	case dbm >= -95:
+		return 3
+	case dbm >= -105:
+		return 2
+	case dbm > -120:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func signalDBMToQuality(dbm float64) string {
+	switch {
+	case dbm >= -75:
+		return "Excellent"
+	case dbm >= -85:
+		return "Good"
+	case dbm >= -95:
+		return "Fair"
+	case dbm >= -105:
+		return "Weak"
+	default:
+		return "Poor"
+	}
+}
+
+func get4GSignalInfo() map[string]interface{} {
+	result := map[string]interface{}{
+		"signal_dbm":     nil,
+		"signal_quality": "Unknown",
+		"signal_bars":    0,
+	}
+
+	netInfo := ReadNetworkStatus()
+	fourG, ok := netInfo["4g"].(map[string]interface{})
+	if !ok || fourG == nil {
+		return result
+	}
+	if dbm, ok := fourG["signal_dbm"].(float64); ok {
+		result["signal_dbm"] = dbm
+		result["signal_quality"] = signalDBMToQuality(dbm)
+		result["signal_bars"] = signalDBMToBars(dbm)
+		return result
+	}
+	if dbm, ok := fourG["signal_dbm"].(int); ok {
+		f := float64(dbm)
+		result["signal_dbm"] = f
+		result["signal_quality"] = signalDBMToQuality(f)
+		result["signal_bars"] = signalDBMToBars(f)
+	}
+	if quality, ok := fourG["signal_quality"].(string); ok && quality != "" {
+		result["signal_quality"] = quality
+	}
+	return result
+}
+
 type statusWriter struct {
 	http.ResponseWriter
 	status int
@@ -44,32 +182,6 @@ type statusWriter struct {
 func (w *statusWriter) WriteHeader(code int) {
 	w.status = code
 	w.ResponseWriter.WriteHeader(code)
-}
-
-// processLogWriter forwards external process output through stdlib logger
-// so logger scope filters can decide whether to emit these lines.
-type processLogWriter struct {
-	prefix string
-	mu     sync.Mutex
-	carry  string
-}
-
-func (w *processLogWriter) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	chunk := w.carry + string(p)
-	lines := strings.Split(chunk, "\n")
-	for i := 0; i < len(lines)-1; i++ {
-		line := strings.TrimSpace(lines[i])
-		if line == "" {
-			continue
-		}
-		log.Printf("%s %s", w.prefix, line)
-	}
-
-	w.carry = lines[len(lines)-1]
-	return len(p), nil
 }
 
 // ParamSetRequest represents a request to set a parameter
@@ -135,8 +247,6 @@ type MAVLinkBridge struct {
 var bridge *MAVLinkBridge
 var bridgeOnce sync.Once
 
-// startCameraStreamer removed
-
 // InitMAVLinkBridge initializes the MAVLink bridge with the given node
 func InitMAVLinkBridge(node *gomavlib.Node) {
 	bridgeOnce.Do(func() {
@@ -174,8 +284,29 @@ func HandleHeartbeat(sysID uint8) {
 	}
 }
 
+func trimParamID(id string) string {
+	if i := strings.IndexByte(id, 0); i >= 0 {
+		id = id[:i]
+	}
+	return strings.TrimSpace(id)
+}
+
+func (b *MAVLinkBridge) lookupCachedParamLocked(paramName string) (CachedParameter, bool) {
+	if param, ok := b.paramCache[paramName]; ok {
+		return param, true
+	}
+	want := trimParamID(paramName)
+	for k, param := range b.paramCache {
+		if trimParamID(k) == want {
+			return param, true
+		}
+	}
+	return CachedParameter{}, false
+}
+
 func (b *MAVLinkBridge) processParamValues() {
 	for msg := range b.paramValueCh {
+		paramID := trimParamID(msg.ParamId)
 		// Decode value based on type
 		var decodedValue float64
 		if msg.ParamType == common.MAV_PARAM_TYPE_INT32 ||
@@ -191,8 +322,8 @@ func (b *MAVLinkBridge) processParamValues() {
 
 		b.paramCacheMutex.Lock()
 
-		b.paramCache[msg.ParamId] = CachedParameter{
-			ParamId:    msg.ParamId,
+		b.paramCache[paramID] = CachedParameter{
+			ParamId:    paramID,
 			ParamValue: decodedValue,
 			ParamType:  int(msg.ParamType),
 			ParamIndex: msg.ParamIndex,
@@ -279,7 +410,7 @@ func (b *MAVLinkBridge) RequestParameterList() error {
 
 	log.Printf("[WEB] Sending PARAM_REQUEST_LIST to system %d", sysID)
 
-	err := b.node.WriteMessageAll(msg)
+	err := b.writeToPixhawk(msg)
 	if err != nil {
 		b.paramCacheMutex.Lock()
 		b.paramLoading = false
@@ -332,8 +463,7 @@ func (b *MAVLinkBridge) GetCachedParameter(paramName string) (CachedParameter, b
 	b.paramCacheMutex.RLock()
 	defer b.paramCacheMutex.RUnlock()
 
-	param, exists := b.paramCache[paramName]
-	return param, exists
+	return b.lookupCachedParamLocked(paramName)
 }
 
 func (b *MAVLinkBridge) SetParameter(paramName string, paramValue float64, paramType string) *ParamSetResponse {
@@ -382,7 +512,7 @@ func (b *MAVLinkBridge) SetParameter(paramName string, paramValue float64, param
 
 	log.Printf("[WEB] Sending PARAM_SET: %s = %v (type: %s)", paramName, paramValue, paramType)
 
-	err := b.node.WriteMessageAll(paramMsg)
+	err := b.writeToPixhawk(paramMsg)
 	if err != nil {
 		return &ParamSetResponse{
 			Success:   false,
@@ -408,11 +538,10 @@ func (b *MAVLinkBridge) waitForParamResponse(paramName string) *ParamSetResponse
 		select {
 		case <-ticker.C:
 			b.paramCacheMutex.RLock()
-			param, exists := b.paramCache[paramName]
+			param, exists := b.lookupCachedParamLocked(paramName)
 			lastUpdate := b.paramLastUpdate
 			b.paramCacheMutex.RUnlock()
 
-			// Check if we got an update after sending the request
 			if exists && lastUpdate.After(startTime) {
 				log.Printf("[WEB] PARAM_VALUE received: %s = %v", paramName, param.ParamValue)
 				return &ParamSetResponse{
@@ -463,6 +592,7 @@ func formatUnixTimestamp(ts uint64) interface{} {
 }
 
 func StartServer(port int, authClient *auth.Client, droneUUID string) {
+	registerHostPowerRoutes()
 	// Pre-load XML file into memory cache for faster serving
 	loadXMLCache()
 
@@ -475,8 +605,12 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 	// Create a custom file server with caching headers
 	fileServer := http.FileServer(http.FS(fsys))
 	fileServerWithCache := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Set cache headers for static files
-		w.Header().Set("Cache-Control", "public, max-age=3600")
+		path := r.URL.Path
+		if path == "/" || strings.HasSuffix(path, ".html") || strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".css") {
+			w.Header().Set("Cache-Control", "no-cache")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+		}
 		fileServer.ServeHTTP(w, r)
 	})
 
@@ -501,7 +635,12 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 	http.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-cache")
-		json.NewEncoder(w).Encode(metrics.Global.GetSnapshot())
+		snap := metrics.Global.GetSnapshot()
+		if diag := getMavlinkDiagnostics(); diag != nil {
+			snap["mavlink_diagnostics"] = diag
+		}
+		mergeNetworkIntoSnapshot(snap)
+		json.NewEncoder(w).Encode(snap)
 	})
 
 	// API endpoint for connection status
@@ -776,6 +915,14 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 			expirationHours = 720
 		}
 
+		if status, statusErr := authClient.GetAPIKeyStatus(); statusErr == nil && status != nil && status.HasActiveKey == 0x01 {
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": "drone already has an active API key — revoke current key first",
+			})
+			return
+		}
+
 		state, err := authClient.RequestAPIKey(expirationHours)
 		if err != nil {
 			if err.Error() == "drone already has an active API key" {
@@ -872,17 +1019,667 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 		})
 	})
 
-	// Health check endpoint
-	http.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
+	// API endpoint to list available landing templates
+	http.HandleFunc("/api/landing/templates", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-cache")
 		setCORSHeaders(w)
+
+		if r.Method == http.MethodOptions {
+			return
+		}
+
+		templatesDir := projectPath("Find_landing", "templates")
+		files, err := os.ReadDir(templatesDir)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   err.Error(),
+			})
+			return
+		}
+
+		var templates []string
+		for _, file := range files {
+			if !file.IsDir() && strings.HasSuffix(strings.ToLower(file.Name()), ".png") {
+				// Remove .png extension to get template name
+				name := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
+				templates = append(templates, name)
+			}
+		}
+
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status": "ok",
+			"success":   true,
+			"templates": templates,
+		})
+	})
+
+	// Serve template images
+	http.HandleFunc("/templates/", func(w http.ResponseWriter, r *http.Request) {
+		templateName := strings.TrimPrefix(r.URL.Path, "/templates/")
+		templatePath := filepath.Join(projectPath("Find_landing", "templates"), templateName)
+
+		// Security check - prevent directory traversal
+		if strings.Contains(templateName, "..") {
+			http.Error(w, "Invalid template name", http.StatusBadRequest)
+			return
+		}
+
+		// Check if file exists
+		if _, err := os.Stat(templatePath); os.IsNotExist(err) {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		http.ServeFile(w, r, templatePath)
+	})
+
+	// API endpoint to start camera streamer
+	http.HandleFunc("/api/camera/start", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		setCORSHeaders(w)
+
+		if r.Method == http.MethodOptions {
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if len(listRunningStreamerPIDs()) > 0 {
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "Camera streamer is already running",
+				"pids":    listRunningStreamerPIDs(),
+			})
+			return
+		}
+
+		pids, err := startCameraStreamersFromConfig()
+		if err != nil {
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": fmt.Sprintf("Failed to start camera: %v", err),
+			})
+			return
+		}
+
+		log.Printf("[CAMERA] Camera streamer started (PIDs: %v)", pids)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "Camera streamer started",
+			"pid":     pids[0],
+			"pids":    pids,
+		})
+	})
+
+	// API endpoint to stop camera streamer
+	http.HandleFunc("/api/camera/stop", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		setCORSHeaders(w)
+
+		if r.Method == http.MethodOptions {
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		pids := listRunningStreamerPIDs()
+		stopCameraStreamers()
+
+		if len(pids) == 0 {
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "Camera streamer is not running",
+			})
+			return
+		}
+
+		log.Printf("[CAMERA] Camera streamer stopped (PIDs: %v)", pids)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "Camera streamer stopped",
+			"pids":    pids,
+		})
+	})
+
+	// API: restart all enabled camera streams (reload camera_config_*.json)
+	http.HandleFunc("/api/camera/restart", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		setCORSHeaders(w)
+
+		if r.Method == http.MethodOptions {
+			return
+		}
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		pids, err := restartCameraStreamers()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+		log.Printf("[CAMERA] Camera streamer restarted via API (PIDs: %v)", pids)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "Camera stream restarted",
+			"pids":    pids,
+		})
+	})
+
+	http.HandleFunc("/api/camera/test-report", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		setCORSHeaders(w)
+		if r.Method == http.MethodOptions {
+			return
+		}
+		id, err := strconv.Atoi(r.URL.Query().Get("camera_id"))
+		if err != nil || id < 0 || id > 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"verdict": "camera_id phải là 0 hoặc 1"})
+			return
+		}
+		json.NewEncoder(w).Encode(cameraSideReport(id))
+	})
+
+	http.HandleFunc("/api/camera/preview", func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w)
+		if r.Method == http.MethodOptions {
+			return
+		}
+		id, err := strconv.Atoi(r.URL.Query().Get("camera_id"))
+		if err != nil || id < 0 || id > 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		info, err := os.Stat(previewFile(id))
+		if err != nil || time.Since(info.ModTime()) > 2*time.Second || info.Size() == 0 {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("Cache-Control", "no-store")
+		http.ServeFile(w, r, previewFile(id))
+	})
+
+	// API: apply camera boot overlay + schedule CM5 reboot (needs install/camera/install_camera_sudoers.sh)
+	http.HandleFunc("/api/camera/apply-overlay", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		setCORSHeaders(w)
+		if r.Method == http.MethodOptions {
+			return
+		}
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		text, err := applyCameraOverlayHost()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "Không thể áp dụng overlay/reboot. Chạy: sudo bash install/camera/install_camera_sudoers.sh",
+				"error":   err.Error(),
+				"output":  text,
+			})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "Đã áp dụng boot overlay — CM5 reboot trong ~2s nếu config đổi",
+			"output":  text,
+		})
+	})
+
+	// API endpoint to check camera status
+	http.HandleFunc("/api/camera/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		setCORSHeaders(w)
+
+		if r.Method == http.MethodOptions {
+			return
+		}
+
+		json.NewEncoder(w).Encode(cameraStatusPayload())
+	})
+
+	http.HandleFunc("/api/camera/landing", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		setCORSHeaders(w)
+		if r.Method == http.MethodOptions {
+			return
+		}
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		cfg, _ := loadAppConfig()
+		cameraID := -1
+		if q := r.URL.Query().Get("camera_id"); q != "" {
+			if n, err := strconv.Atoi(q); err == nil {
+				cameraID = n
+			}
+		}
+		maxAge := 10 * time.Second
+		if q := r.URL.Query().Get("max_age_sec"); q != "" {
+			if sec, err := strconv.ParseFloat(q, 64); err == nil && sec > 0 {
+				maxAge = time.Duration(sec * float64(time.Second))
+			}
+		}
+		if cameraID >= 0 {
+			entry := map[string]interface{}{"camera_id": cameraID}
+			if lt := camera.ReadLandingTelemetry(cameraID, maxAge); lt != nil {
+				entry["landing"] = lt
+			}
+			if st := camera.ReadStreamStats(cameraID, maxAge); st != nil {
+				entry["stream_stats"] = st
+			}
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "cameras": []map[string]interface{}{entry}})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"cameras": camera.LandingStatusForConfig(cfg, maxAge),
+		})
+	})
+
+	// API: live camera scan + cached port status (rpicam-hello)
+	http.HandleFunc("/api/camera/detect", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		setCORSHeaders(w)
+		if r.Method == http.MethodOptions {
+			return
+		}
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		refresh := r.URL.Query().Get("refresh") == "1"
+		result, err := camera.ScanLive(refresh)
+		if err != nil && result == nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(result)
+	})
+
+	// API: supported camera sensor catalog
+	http.HandleFunc("/api/camera/registry", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		setCORSHeaders(w)
+		if r.Method == http.MethodOptions {
+			return
+		}
+		reg, err := camera.LoadRegistry()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "registry": reg})
+	})
+
+	// API: save overlay/sensor per port (camera_detected.json)
+	http.HandleFunc("/api/camera/ports", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		setCORSHeaders(w)
+		if r.Method == http.MethodOptions {
+			return
+		}
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			Ports map[string]camera.PortConfig `json:"ports"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+			return
+		}
+		if err := camera.UpdatePortConfig(body.Ports); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+			return
+		}
+		log.Printf("[WEB][CAMERA] Port config saved to camera_detected.json")
+
+		needsReboot, setupOut, setupErr := runSetupCameraScript()
+		resp := map[string]interface{}{
+			"success":      true,
+			"needs_reboot": needsReboot,
+			"setup_output": setupOut,
+		}
+		if setupErr != nil {
+			resp["setup_error"] = setupErr.Error()
+			if strings.Contains(setupErr.Error(), "password") || strings.Contains(setupErr.Error(), "sudo") {
+				resp["message"] = "Đã lưu loại CAM. Cần: sudo bash install/camera/install_camera_sudoers.sh rồi nhấn «Reboot CM5»."
+			} else {
+				resp["message"] = "Đã lưu loại CAM. setup_camera lỗi — xem setup_output"
+			}
+		} else if needsReboot {
+			resp["message"] = "Đã lưu loại CAM. Boot overlay đã đổi — nhấn «Reboot CM5» trên UI để áp dụng."
+		} else {
+			resp["message"] = "Đã lưu loại CAM."
+		}
+		json.NewEncoder(w).Encode(resp)
+	})
+
+	// Backward compatible alias — uses rpicam scan
+	http.HandleFunc("/api/camera/test", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		setCORSHeaders(w)
+		if r.Method == http.MethodOptions {
+			return
+		}
+		result, _ := camera.ScanLive(true)
+		if result == nil {
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "scan failed"})
+			return
+		}
+		legacy := make([]map[string]interface{}, 0, len(result.Connected))
+		for _, c := range result.Connected {
+			legacy = append(legacy, map[string]interface{}{
+				"id":   c.LibcameraIndex,
+				"info": fmt.Sprintf("%s @ %s (%s)", c.SensorName, c.Connector, c.Resolution),
+			})
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": result.ConnectedCount > 0,
+			"cameras": legacy,
+			"detail":  result,
+		})
+	})
+
+	// API endpoint to load camera config used by settings page
+	http.HandleFunc("/api/camera/config/load", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		setCORSHeaders(w)
+
+		if r.Method == http.MethodOptions {
+			return
+		}
+
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "Method not allowed",
+			})
+			return
+		}
+
+		cameraID := 0
+		if idStr := r.URL.Query().Get("camera_id"); idStr != "" {
+			if parsed, err := strconv.Atoi(idStr); err == nil {
+				cameraID = parsed
+			}
+		}
+
+		cfg, err := loadAppConfig()
+		if err != nil {
+			log.Printf("[WEB][CAMERA] Failed to load app config: %v", err)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"config":  defaultCameraConfig(),
+				"streams": []map[string]interface{}{},
+				"warning": err.Error(),
+			})
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"config":  cameraConfigToUI(cfg, cameraID),
+			"streams": cameraStreamsSummary(cfg),
+			"path":    resolveAppConfigPath(),
+		})
+	})
+
+	// API endpoint to save camera config from settings page
+	http.HandleFunc("/api/camera/config/save", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		setCORSHeaders(w)
+
+		if r.Method == http.MethodOptions {
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "Method not allowed",
+			})
+			return
+		}
+
+		var incoming map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
+			log.Printf("[WEB][CAMERA] Invalid save camera payload: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "Invalid JSON payload",
+				"error":   err.Error(),
+			})
+			return
+		}
+
+		if err := saveCameraStreamFromUI(incoming); err != nil {
+			log.Printf("[WEB][CAMERA] Failed to save camera config: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "Failed to save camera config",
+				"error":   err.Error(),
+			})
+			return
+		}
+
+		cfg := mustLoadAppConfig()
+		if err := syncAllStreamerConfigs(cfg); err != nil {
+			log.Printf("[WEB][CAMERA] Failed to write camera_config_*.json: %v", err)
+		}
+
+		restart := boolFromMap(incoming, "restart", false)
+		var pids []int
+		var restartErr error
+		if restart {
+			pids, restartErr = restartCameraStreamers()
+			if restartErr != nil {
+				log.Printf("[WEB][CAMERA] Stream restart after save failed: %v", restartErr)
+			}
+		}
+
+		cfgPath := resolveAppConfigPath()
+		cameraID := intFromMap(incoming, "camera_id", 0)
+		log.Printf("[WEB][CAMERA] Camera stream saved: camera_id=%d path=%s restart=%v", cameraID, cfgPath, restart)
+		resp := map[string]interface{}{
+			"success": true,
+			"path":    cfgPath,
+			"config":  cameraConfigToUI(cfg, cameraID),
+		}
+		if restart {
+			resp["restarted"] = restartErr == nil
+			resp["pids"] = pids
+			if restartErr != nil {
+				resp["restart_error"] = restartErr.Error()
+			}
+		}
+		json.NewEncoder(w).Encode(resp)
+	})
+
+	http.HandleFunc("/api/camera/config/global", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		setCORSHeaders(w)
+
+		if r.Method == http.MethodOptions {
+			return
+		}
+
+		cfg := mustLoadAppConfig()
+		if r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success":             true,
+				"primary_camera_id":   cfg.Camera.PrimaryCameraID,
+				"auto_memory_profile": cfg.Camera.AutoMemoryProfile,
+				"memory_tier_gb":      int(camera.DetectMemoryTier()),
+			})
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Method not allowed"})
+			return
+		}
+
+		var incoming map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid JSON"})
+			return
+		}
+		if err := saveCameraGlobalFromUI(incoming); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+			return
+		}
+		cfg = mustLoadAppConfig()
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":             true,
+			"primary_camera_id":   cfg.Camera.PrimaryCameraID,
+			"auto_memory_profile": cfg.Camera.AutoMemoryProfile,
+			"memory_tier_gb":      int(camera.DetectMemoryTier()),
+		})
+	})
+
+	// API endpoint to save landing config
+	http.HandleFunc("/api/landing/config/save", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		setCORSHeaders(w)
+
+		if r.Method == http.MethodOptions {
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var config map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "Invalid JSON: " + err.Error(),
+			})
+			return
+		}
+
+		configPath := projectPath("Find_landing", "landing_config.json")
+		configData, err := json.MarshalIndent(config, "", "  ")
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "Failed to marshal config: " + err.Error(),
+			})
+			return
+		}
+
+		if err := os.WriteFile(configPath, configData, 0644); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "Failed to save config: " + err.Error(),
+			})
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "Landing config saved successfully",
+			"path":    configPath,
+		})
+	})
+
+	// API endpoint to load landing config
+	http.HandleFunc("/api/landing/config/load", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		setCORSHeaders(w)
+
+		if r.Method == http.MethodOptions {
+			return
+		}
+
+		configPath := projectPath("Find_landing", "landing_config.json")
+		configData, err := os.ReadFile(configPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": false,
+					"message": "Config file not found",
+				})
+			} else {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": false,
+					"message": "Failed to read config: " + err.Error(),
+				})
+			}
+			return
+		}
+
+		var config map[string]interface{}
+		if err := json.Unmarshal(configData, &config); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "Failed to parse config: " + err.Error(),
+			})
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"config":  config,
 		})
 	})
 
 	// API endpoint to get real-time network info
+	// Network status API
+	registerCellularModuleHandlers()
 	http.HandleFunc("/api/network/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -892,24 +1689,8 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 			return
 		}
 
-		// Read connection status file
-		statusFile := projectPath("data", "connection_status.json")
-		statusData, err := os.ReadFile(statusFile)
-
-		var networkInfo map[string]interface{}
-
-		if err == nil {
-			json.Unmarshal(statusData, &networkInfo)
-		} else {
-			// Return default structure if file doesn't exist
-			networkInfo = map[string]interface{}{
-				"4g":               map[string]interface{}{"status": "unavailable"},
-				"wifi":             map[string]interface{}{"status": "unavailable"},
-				"ethernet":         map[string]interface{}{"status": "unavailable"},
-				"active_interface": nil,
-				"timestamp":        time.Now().Unix(),
-			}
-		}
+		// ReadNetworkStatus: connection_manager → /run/dronebridge/network_status.json
+		networkInfo := ReadNetworkStatus()
 
 		if fourGInfo, ok := networkInfo["4g"].(map[string]interface{}); ok {
 			if status, _ := fourGInfo["status"].(string); status == "connected" || status == "available" {
@@ -925,7 +1706,89 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 		json.NewEncoder(w).Encode(networkInfo)
 	})
 
-	// API endpoint to set/get network priority
+	// Canonical API: network.mode in config.yaml (prefer_4g | 4g_only | wifi_only)
+	http.HandleFunc("/api/network/mode", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		setCORSHeaders(w)
+
+		if r.Method == http.MethodOptions {
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			cfg, err := loadAppConfig()
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": false,
+					"message": "Failed to load config: " + err.Error(),
+				})
+				return
+			}
+			json.NewEncoder(w).Encode(buildNetworkModePayload(cfg))
+
+		case http.MethodPost:
+			var req map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": false,
+					"message": "Invalid JSON",
+				})
+				return
+			}
+
+			mode, _ := req["mode"].(string)
+			mode = strings.TrimSpace(mode)
+			if mode == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": false,
+					"message": "mode required (prefer_4g, 4g_only, wifi_only)",
+				})
+				return
+			}
+
+			var cloudFallback *bool
+			if v, ok := req["cloud_wifi_fallback"].(bool); ok {
+				cloudFallback = &v
+			}
+			var fallbackDelay *int
+			if v, ok := req["fallback_delay"].(float64); ok {
+				d := int(v)
+				fallbackDelay = &d
+			}
+
+			cfg, err := applyNetworkMode(mode, cloudFallback, fallbackDelay)
+			if err != nil {
+				if _, ok := err.(*networkModeError); ok {
+					w.WriteHeader(http.StatusBadRequest)
+				} else {
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": false,
+					"message": err.Error(),
+				})
+				return
+			}
+
+			out := buildNetworkModePayload(cfg)
+			out["message"] = "Network mode set to " + mode
+			json.NewEncoder(w).Encode(out)
+
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "Method not allowed",
+			})
+		}
+	})
+
+	// Legacy alias — maps wifi/4g priority to config.yaml network.mode
 	http.HandleFunc("/api/network/priority", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		setCORSHeaders(w)
@@ -935,7 +1798,6 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 		}
 
 		if r.Method == http.MethodPost {
-			// Set priority
 			var req map[string]string
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
@@ -956,42 +1818,41 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 				return
 			}
 
-			// Run connection_manager.py to set priority
-			cmd := exec.Command("python3", projectPath("Module_4G", "connection_manager.py"), "priority", priority)
-			if err := cmd.Run(); err != nil {
+			mode := legacyPriorityToMode(priority)
+			cfg, err := applyNetworkMode(mode, nil, nil)
+			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				json.NewEncoder(w).Encode(map[string]interface{}{
 					"success": false,
-					"message": "Failed to set priority",
+					"message": err.Error(),
 				})
 				return
 			}
 
-			// Trigger reconnect with new priority
-			go func() {
-				time.Sleep(1 * time.Second)
-				exec.Command("python3", projectPath("Module_4G", "connection_manager.py"), "once").Run()
-			}()
-
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"success":  true,
-				"message":  "Priority set to " + priority,
+				"message":  "Priority set to " + priority + " (mode=" + mode + ")",
 				"priority": priority,
+				"mode":     cfg.Network.Mode,
 			})
 		} else {
-			// Get priority
-			configData, err := os.ReadFile("/home/pi/connection_config.json")
-			var config map[string]interface{}
-
-			if err == nil {
-				json.Unmarshal(configData, &config)
-			} else {
-				config = map[string]interface{}{"priority": "4g"}
+			cfg, err := loadAppConfig()
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": false,
+					"message": err.Error(),
+				})
+				return
 			}
-
+			mode := cfg.Network.Mode
+			if mode == "" {
+				mode = "prefer_4g"
+			}
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"success":  true,
-				"priority": config["priority"],
+				"priority": networkModeToLegacyPriority(mode),
+				"mode":     mode,
 			})
 		}
 	})
@@ -1015,12 +1876,9 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 			return
 		}
 
-				// Run connection_manager.py to reconnect
+		// Run connection_manager.py to reconnect
 		go func() {
-			cmd := exec.Command("python3", projectPath("Module_4G", "connection_manager.py"), "once")
-			if err := cmd.Run(); err != nil {
-				log.Printf("[WEB][4G] Failed to trigger reconnection: %v", err)
-			}
+			triggerNetmonApply("")
 		}()
 
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1068,25 +1926,22 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 			return
 		}
 
-		go func(targetNet string) {
-			cmdPriority := exec.Command("python3", projectPath("Module_4G", "connection_manager.py"), "priority", targetNet)
-			if err := cmdPriority.Run(); err != nil {
-				log.Printf("[WEB][NET] Failed to set priority to %s: %v", targetNet, err)
-				return
-			}
-
-			time.Sleep(300 * time.Millisecond)
-
-			cmdReconnect := exec.Command("python3", projectPath("Module_4G", "connection_manager.py"), "once")
-			if err := cmdReconnect.Run(); err != nil {
-				log.Printf("[WEB][NET] Failed to switch network to %s: %v", targetNet, err)
-			}
-		}(target)
+		mode := switchTargetToMode(target)
+		cfg, err := applyNetworkMode(mode, nil, nil)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
 
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
-			"message": "Network switch triggered",
+			"message": "Switched to " + target + " (mode=" + mode + ")",
 			"target":  target,
+			"mode":    cfg.Network.Mode,
 		})
 	})
 
@@ -1433,52 +2288,4 @@ func loadXMLCache() {
 			log.Printf("[WEB] Pre-loaded PX4ParameterFactMetaData.xml into cache (%d bytes)", len(xmlContent))
 		}
 	})
-}
-// setCORSHeaders sets standard CORS headers for API responses
-func setCORSHeaders(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
-}
-
-// projectPath resolves a path relative to the project root
-func projectPath(parts ...string) string {
-	return filepath.Join(append([]string{"."}, parts...)...)
-}
-
-// get4GSignalInfo returns current 4G signal strength and quality metrics
-func get4GSignalInfo() map[string]interface{} {
-	// Default mock values if no module is found or error occurs
-	info := map[string]interface{}{
-		"signal": 0,
-		"rsrp":   0,
-		"rsrq":   0,
-		"rssi":   0,
-		"mode":   "unknown",
-	}
-
-	// Try to get real signal info using Python script if it exists
-	cmd := exec.Command("python3", projectPath("Module_4G", "set_4g_mode.py"), "get")
-	output, err := cmd.Output()
-	if err == nil {
-		var result map[string]interface{}
-		if err := json.Unmarshal(output, &result); err == nil {
-			if success, ok := result["success"].(bool); ok && success {
-				if signal, ok := result["signal"].(float64); ok {
-					info["signal"] = int(signal)
-				}
-				if mode, ok := result["mode"].(string); ok {
-					info["mode"] = mode
-				}
-				// Extract other metrics if available
-				for _, k := range []string{"rsrp", "rsrq", "rssi"} {
-					if v, ok := result[k].(float64); ok {
-						info[k] = int(v)
-					}
-				}
-			}
-		}
-	}
-
-	return info
 }

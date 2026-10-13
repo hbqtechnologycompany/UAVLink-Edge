@@ -1,0 +1,24 @@
+# Đặt tại: /etc/systemd/system/dronebridge.service
+[Unit]
+Description=DroneBridge MAVLink Forwarder
+After=dronebridge-eth-setup.service dronebridge-camera-setup.service dronebridge-lcd-i2c-setup.service dronebridge-uart-setup.service dronebridge-netmon.service
+Wants=dronebridge-eth-setup.service dronebridge-camera-setup.service dronebridge-lcd-i2c-setup.service dronebridge-uart-setup.service dronebridge-netmon.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/dronebridge
+ExecStart=/opt/dronebridge/dronebridge --config /opt/dronebridge/config.yaml
+
+# Chạy với user thực tế trên Pi (install.sh thay User=/Group= khi cài)
+User=pi
+Group=pi
+
+Restart=always
+RestartSec=10s
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dronebridge
+
+[Install]
+WantedBy=multi-user.target
