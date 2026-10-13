@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"UAVLink-Edge/metrics"
+	"DroneBridge/metrics"
 )
 
 // RequestAPIKey requests a new API key from the router with specified expiration
@@ -81,6 +81,9 @@ func (c *Client) RequestAPIKey(expirationHours int) (*APIKeyResponse, error) {
 	}
 
 	if resp.Result != ResultSuccess {
+		if resp.ErrorCode == 0x01 {
+			return resp, fmt.Errorf("drone already has an active API key")
+		}
 		return resp, fmt.Errorf("API key request failed (error code: 0x%02x)", resp.ErrorCode)
 	}
 

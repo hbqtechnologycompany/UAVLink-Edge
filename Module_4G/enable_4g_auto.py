@@ -10,6 +10,7 @@ import time
 import re
 import atexit
 import os
+import json
 import gpiod
 from gpiod.line import Direction, Value
 import serial
@@ -18,8 +19,9 @@ import serial.tools.list_ports
 IS_ROOT = False
 
 # ─── Cấu hình ──────────────────────────────────────────────────
-QMI_DEV    = "/dev/cdc-wdm0"
-IFACE      = "wwan0"
+QMI_DEV    = os.getenv("DRONEBRIDGE_QMI_DEV", "/dev/cdc-wdm0")
+IFACE      = os.getenv("DRONEBRIDGE_WWAN_IFACE", "wwan0")
+MODEM_STATE_FILE = "/run/dronebridge/modem_net.json"
 APN        = "v-internet"          # APN Viettel
 SIM7600_VID = "1e0e"
 SIM7600_PID_ALLOW = {
@@ -39,9 +41,9 @@ QMI_RETRY_ERRORS = (
 
 # GPIO pins (gpiochip0)
 GPIOCHIP           = "gpiochip0"
-GPIO_POWER_MAIN    = 27   # HIGH = Power ON
+GPIO_POWER_MAIN    = 27   # LOW  = Power ON  (đảo logic)
 GPIO_CM5_ON_OFF_4G = 10   # LOW  = Power ON  (transistor đảo logic)
-GPIO_CM5_RESET_4G  = 22   # LOW  = Normal
+GPIO_CM5_RESET_4G  = 17   # LOW  = Normal (đổi từ GPIO22 — nhường I2C3 LCD)
 GPIO_W_DISABLE1    = 2    # HIGH = RF Enabled
 GPIO_W_DISABLE2    = 3    # HIGH = GNSS Enabled
 GPIO_PINS = [GPIO_POWER_MAIN, GPIO_CM5_ON_OFF_4G, GPIO_CM5_RESET_4G,
@@ -113,6 +115,61 @@ def run_root(cmd, timeout=10):
     if IS_ROOT:
         return run(cmd, timeout=timeout)
     return run(["sudo"] + cmd, timeout=timeout)
+
+
+# ─── wwan0 netdev (khối 4G — chỉ file này rename / ghi modem_net.json) ─────
+def _discover_modem_netdev():
+    try:
+        names = sorted(os.listdir("/sys/class/net"))
+    except OSError:
+        return None
+    for name in names:
+        if not (name.startswith("wwu") or name.startswith("wwan")):
+            continue
+        dev_path = f"/sys/class/net/{name}/device"
+        if not os.path.exists(dev_path):
+            continue
+        try:
+            usb_dev = os.path.basename(os.path.realpath(dev_path)).split(":")[0]
+            with open(f"/sys/bus/usb/devices/{usb_dev}/idVendor") as f:
+                if f.read().strip().lower() != SIM7600_VID:
+                    continue
+        except OSError:
+            pass
+        return name
+    return None
+
+
+def ensure_canonical_wwan():
+    if os.path.exists(f"/sys/class/net/{IFACE}"):
+        return True
+    src = _discover_modem_netdev()
+    if not src or src == IFACE:
+        return bool(src)
+    run_root(["ip", "link", "set", src, "down"], timeout=5)
+    rc, _, _ = run_root(["ip", "link", "set", src, "name", IFACE], timeout=5)
+    return rc == 0 and os.path.exists(f"/sys/class/net/{IFACE}")
+
+
+def _get_wwan_ipv4():
+    rc, out, _ = run(["ip", "-4", "addr", "show", IFACE])
+    if rc != 0 or not out:
+        return None
+    if "state UP" not in out and "state UNKNOWN" not in out:
+        if ",UP>" not in out and "<UP," not in out:
+            return None
+    m = re.search(r"inet (\d+\.\d+\.\d+\.\d+)", out)
+    return m.group(1) if m else None
+
+
+def _write_modem_state(ready: bool, ip=None, phase: str = ""):
+    os.makedirs(os.path.dirname(MODEM_STATE_FILE), exist_ok=True)
+    with open(MODEM_STATE_FILE, "w") as f:
+        json.dump({
+            "iface": IFACE, "ip": ip, "ready": ready, "phase": phase,
+            "qmi_dev": QMI_DEV if os.path.exists(QMI_DEV) else None,
+        }, f, indent=2)
+
 
 def wait_qmi_ready(max_wait=12):
     """Đợi endpoint QMI phản hồi ổn định trước khi gọi service cụ thể."""
@@ -274,7 +331,7 @@ def step_gpio_power_on():
     already_up = os.path.exists("/dev/ttyUSB2")
 
     gpio_map = [
-        (GPIO_POWER_MAIN,    1, "PWR_MAIN    → ON"),
+        (GPIO_POWER_MAIN,    0, "PWR_MAIN    → ON  (low)"),
         (GPIO_CM5_ON_OFF_4G, 0, "ON_OFF_4G   → Power ON  (low)"),
         (GPIO_CM5_RESET_4G,  0, "RESET_4G    → Normal    (low)"),
         (GPIO_W_DISABLE1,    1, "W_DISABLE1  → RF ON"),
@@ -360,6 +417,36 @@ def _find_sim7600_usb_iface():
 
     return None
 
+
+def _usb_reset_sim7600_device() -> bool:
+    """Reset USB device khi modem chỉ còn node device, mất interface (2-1:1.x)."""
+    import glob
+    import os
+
+    for dev_path in sorted(glob.glob("/sys/bus/usb/devices/*")):
+        if ":" in os.path.basename(dev_path):
+            continue
+        try:
+            vid_path = os.path.join(dev_path, "idVendor")
+            auth_path = os.path.join(dev_path, "authorized")
+            if not os.path.isfile(vid_path) or not os.path.isfile(auth_path):
+                continue
+            with open(vid_path) as f:
+                vid = f.read().strip().lower()
+            if vid != SIM7600_VID:
+                continue
+            dev_name = os.path.basename(dev_path)
+            info(f"USB reset modem device {dev_name} (authorized 0→1)...")
+            run_root(["sh", "-c", f"echo 0 > {auth_path}"])
+            time.sleep(2)
+            run_root(["sh", "-c", f"echo 1 > {auth_path}"])
+            time.sleep(5)
+            return True
+        except Exception:
+            continue
+    return False
+
+
 def step_switch_to_qmi_driver():
     section("BƯỚC 2/6 — Switch driver → qmi_wwan")
     import os
@@ -378,6 +465,14 @@ def step_switch_to_qmi_driver():
         if usb_iface:
             break
         time.sleep(1)
+    if not usb_iface:
+        warn("Không thấy USB interface — thử USB reset rồi tìm lại...")
+        if _usb_reset_sim7600_device():
+            for _ in range(20):
+                usb_iface = _find_sim7600_usb_iface()
+                if usb_iface:
+                    break
+                time.sleep(1)
     if not usb_iface:
         fail(
             "Không tìm thấy USB interface của SIM7600 trong sysfs "
@@ -445,6 +540,10 @@ def step_switch_to_qmi_driver():
     for attempt in range(3):
         if wait_qmi_ready(max_wait=10):
             ok(f"QMI sẵn sàng sau ~{attempt+1}s probe")
+            if ensure_canonical_wwan():
+                ok(f"Netdev QMI: {IFACE}")
+            else:
+                warn(f"Chưa có {IFACE} — udev hoặc rename thất bại")
             return True
         time.sleep(1)
 
@@ -481,14 +580,25 @@ def step_verify_modem():
         card_out, _ = qmicli(["--uim-get-card-status"], timeout=10)
         return card_out, bool(card_out and "Card state: 'present'" in card_out)
 
-    def _recover_sim_no_atr():
-        warn("SIM chưa sẵn sàng (no-ATR/absent) — thử reset chân RESET_4G và re-probe")
+    def _at_cpin_hint():
+        resp, _ = send_at("AT+CPIN?", timeout=4)
+        if not resp:
+            return
+        if "SIM not inserted" in resp or "NOT INSERTED" in resp.upper():
+            info("AT+CPIN?: SIM chưa gắn trong khe — kiểm tra SIM nano, hướng chip, ép khe cho khít")
+        elif "+CPIN:" in resp:
+            info(f"AT+CPIN?: {resp.strip()}")
+        elif "CME ERROR" in resp:
+            info(f"AT+CPIN?: {resp.strip()}")
+
+    def _recover_sim_no_atr(attempt=1, max_attempts=3):
+        warn(f"SIM chưa sẵn sàng (no-ATR/absent) — reset RESET_4G (GPIO17) lần {attempt}/{max_attempts}")
         gpio_set(GPIO_CM5_RESET_4G, 1)
         time.sleep(1.5)
         gpio_set(GPIO_CM5_RESET_4G, 0)
-        time.sleep(6)
+        time.sleep(8)
         qmicli_raw(["--ctl-sync"], timeout=6)
-        wait_qmi_ready(max_wait=10)
+        wait_qmi_ready(max_wait=12)
 
     # SIM must be present and unlocked before NAS registration can succeed.
     out, _ = _sim_present_after_reprobe()
@@ -502,12 +612,16 @@ def step_verify_modem():
                 card_state = m.group(1)
             warn(f"SIM card state: {card_state}")
             if "no-atr-received" in out or "absent" in out:
-                _recover_sim_no_atr()
-                out, present = _sim_present_after_reprobe()
-                if present:
-                    ok("SIM card: present (recovered after reset)")
-                else:
-                    fail("SIM card không present")
+                present = False
+                for attempt in range(1, 4):
+                    _recover_sim_no_atr(attempt=attempt)
+                    out, present = _sim_present_after_reprobe()
+                    if present:
+                        ok(f"SIM card: present (recovered sau reset lần {attempt})")
+                        break
+                if not present:
+                    _at_cpin_hint()
+                    fail("SIM card không present (no-ATR) — modem OK, cần gắn/lại SIM vật lý")
                     return False
             else:
                 fail("SIM card không present")
@@ -684,6 +798,10 @@ def step_wait_network():
 # ─── BƯỚC 5: Kết nối data (WDS) ───────────────────────────────
 def step_start_data():
     section(f"BƯỚC 5/6 — Start data connection (APN={APN})")
+
+    if not ensure_canonical_wwan():
+        fail(f"Không có netdev {IFACE} — kiểm tra udev / driver bind")
+        return None
 
     # Enable raw IP trước khi up interface
     info("Enable raw IP mode...")
@@ -879,11 +997,17 @@ def main():
     # Bước 2: Switch sang qmi_wwan
     if not step_switch_to_qmi_driver():
         fail("Không switch được driver — dừng lại")
+        _write_modem_state(False, phase="driver_bind_failed")
+        return 1
+
+    if not ensure_canonical_wwan():
+        fail(f"Không có netdev {IFACE} — kiểm tra udev rule 76-dronebridge-sim7600-wwan")
+        _write_modem_state(False, phase="netdev_missing")
         return 1
 
     # Bước 3: Verify modem
     if not step_verify_modem():
-        fail("Không kết nối được QMI — dừng lại")
+        fail("Modem/QMI hoặc SIM chưa sẵn sàng — dừng lại (xem log BƯỚC 3)")
         return 1
 
     # Bước 3.5: Cấu hình radio qua AT (PSM off, LTE bands, Auto mode)
@@ -910,6 +1034,13 @@ def main():
     # Bước 6: Cấu hình interface
     step_configure_interface(ip_addr, gw_addr, dns1, dns2)
 
+    final_ip = _get_wwan_ipv4()
+    if not final_ip:
+        fail(f"{IFACE} không có IPv4 sau cấu hình — init thất bại")
+        _write_modem_state(False, phase="no_ipv4")
+        return 1
+
+    _write_modem_state(True, ip=final_ip, phase="active")
     print("\n" + "=" * 50)
     print("  HOÀN TẤT — 4G QMI MODE ACTIVE")
     print("=" * 50)

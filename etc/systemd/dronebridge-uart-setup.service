@@ -1,0 +1,13 @@
+[Unit]
+Description=DroneBridge MAVLink UART2/UART3 4-wire
+DefaultDependencies=no
+After=local-fs.target
+Before=dronebridge.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash /opt/dronebridge/setup_mavlink_uart.sh
+
+[Install]
+WantedBy=multi-user.target

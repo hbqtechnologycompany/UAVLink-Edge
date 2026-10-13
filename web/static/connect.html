@@ -6,9 +6,11 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>Connection Settings - UAVLink-Edge</title>
+    <title>Connection Settings - DroneBridge</title>
     <!-- Version: 2026-01-27-16:45 -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="common-nav.css" rel="stylesheet">
+    <script src="common-nav.js"></script>
     <style>
         :root {
             --bg-primary: #0f172a;
@@ -229,7 +231,7 @@
 
         .priority-selector {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 1rem;
             margin-top: 1rem;
         }
@@ -359,13 +361,11 @@
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <a href="dashboard.html" class="back-btn">
-                ← Quay lại
-            </a>
-            <h1>📡 Connection Settings</h1>
-        </div>
+    <header class="db-shell-header">
+        <a href="/dashboard.html" class="db-back-btn">← Về Dashboard</a>
+        <h1 class="db-shell-title">📡 Server &amp; Mạng</h1>
+    </header>
+    <div class="container" style="padding-top:1rem;">
 
         <!-- Status Overview -->
         <div class="status-overview">
@@ -427,31 +427,83 @@
             </div>
         </div>
 
-        <!-- Priority Settings -->
+        <!-- Cellular Module Hardware -->
+        <div class="setting-section">
+            <div class="section-title">
+                <span class="section-icon">📲</span>
+                Module Cellular (phần cứng)
+            </div>
+            <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 1rem;">
+                Chọn driver cho module 4G hoặc 5G trên CM5. Đổi module sẽ khởi động lại modem (khoảng 1–2 phút).
+            </p>
+
+            <div class="priority-selector">
+                <div class="priority-option" id="module-sim7600_qmi" onclick="selectCellularModule('sim7600_qmi')">
+                    <div class="priority-option-icon">📡</div>
+                    <div class="priority-option-name">SIM7600 — 4G USB</div>
+                    <div class="priority-option-desc">QMI qua USB — /dev/cdc-wdm0</div>
+                </div>
+
+                <div class="priority-option" id="module-sim8262_pcie" onclick="selectCellularModule('sim8262_pcie')">
+                    <div class="priority-option-icon">🚀</div>
+                    <div class="priority-option-name">SIM8262-E — 5G PCIe</div>
+                    <div class="priority-option-desc">MHI + QMI — /dev/wwan0qmi0</div>
+                </div>
+            </div>
+
+            <div id="cellularModuleStatus" style="margin-top: 0.75rem; font-size: 0.875rem; color: var(--text-secondary);">
+                Đang tải cấu hình module...
+            </div>
+
+            <div class="setting-row" id="sim8262RatRow" style="display: none; margin-top: 1rem;">
+                <div class="setting-info">
+                    <div class="setting-name">RAT Profile (5G)</div>
+                    <div class="setting-desc">Ưu tiên băng tần cho SIM8262 — áp dụng khi kết nối data</div>
+                </div>
+                <select class="btn btn-secondary" id="ratProfile" onchange="saveRatProfile()">
+                    <option value="stability">Stability (drone)</option>
+                    <option value="balanced">Balanced</option>
+                    <option value="max-speed">Max speed</option>
+                    <option value="legacy">Legacy LTE</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Uplink Mode (config.yaml → network.mode) -->
         <div class="setting-section">
             <div class="section-title">
                 <span class="section-icon">⚡</span>
-                Connection Priority
+                Chế độ uplink server
             </div>
+            <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 1rem;">
+                Điều khiển đường truyền MAVLink/VPN lên server. SSH và dashboard admin vẫn qua WiFi.
+            </p>
 
             <div class="priority-selector">
-                <div class="priority-option active" id="priority-wifi" onclick="setPriority('wifi')">
+                <div class="priority-option" id="mode-wifi_only" onclick="selectMode('wifi_only')">
                     <div class="priority-option-icon">📶</div>
-                    <div class="priority-option-name">WiFi Priority</div>
-                    <div class="priority-option-desc">Ưu tiên WiFi nếu khả dụng, tốc độ cao hơn</div>
+                    <div class="priority-option-name">WiFi</div>
+                    <div class="priority-option-desc">Luôn dùng WiFi cho server (wlan0)</div>
                 </div>
 
-                <div class="priority-option" id="priority-4g" onclick="setPriority('4g')">
+                <div class="priority-option" id="mode-prefer_4g" onclick="selectMode('prefer_4g')">
                     <div class="priority-option-icon">📡</div>
-                    <div class="priority-option-name">4G Priority</div>
-                    <div class="priority-option-desc">Ưu tiên 4G, độ tin cậy cao, phạm vi rộng</div>
+                    <div class="priority-option-name">4G ưu tiên</div>
+                    <div class="priority-option-desc">Ưu tiên 4G; có thể fallback WiFi khi mất sóng</div>
+                </div>
+
+                <div class="priority-option" id="mode-4g_only" onclick="selectMode('4g_only')">
+                    <div class="priority-option-icon">🔒</div>
+                    <div class="priority-option-name">Chỉ 4G</div>
+                    <div class="priority-option-desc">Không fallback WiFi cho uplink server</div>
                 </div>
             </div>
 
             <div style="margin-top: 1rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
-                <button class="btn btn-secondary" onclick="switchNetwork('wifi')">↔ Chuyển sang WiFi</button>
-                <button class="btn btn-secondary" onclick="switchNetwork('4g')">↔ Chuyển sang 4G</button>
+                <button class="btn btn-secondary" onclick="switchNetwork('wifi')">↔ Chuyển sang WiFi ngay</button>
+                <button class="btn btn-secondary" onclick="switchNetwork('4g')">↔ Chuyển sang 4G ngay</button>
             </div>
+            <div id="modeStatusLine" style="margin-top: 0.75rem; font-size: 0.875rem; color: var(--text-secondary);"></div>
         </div>
 
         <!-- Advanced Settings -->
@@ -463,10 +515,10 @@
 
             <div class="setting-row">
                 <div class="setting-info">
-                    <div class="setting-name">Auto-switching</div>
-                    <div class="setting-desc">Tự động chuyển đổi giữa WiFi và 4G khi cần thiết</div>
+                    <div class="setting-name">Fallback WiFi (khi 4G mất)</div>
+                    <div class="setting-desc">Chỉ áp dụng khi chế độ «4G ưu tiên». Tắt = khóa uplink trên 4G dù WiFi còn sóng.</div>
                 </div>
-                <div class="toggle-switch active" id="autoSwitch" onclick="toggleAutoSwitch()"></div>
+                <div class="toggle-switch active" id="cloudWifiFallback" onclick="toggleCloudWifiFallback()"></div>
             </div>
 
             <div class="setting-row">
@@ -503,10 +555,10 @@
                 </select>
             </div>
 
-            <div class="setting-row">
+            <div class="setting-row" id="fourGModeRow">
                 <div class="setting-info">
                     <div class="setting-name">4G Network Mode</div>
-                    <div class="setting-desc">Chọn băng tần cho module 4G (Auto: tự động 2G/3G/4G)</div>
+                    <div class="setting-desc">Chọn băng tần cho module SIM7600 (Auto: tự động 2G/3G/4G)</div>
                 </div>
                 <select class="btn btn-secondary" id="fourGMode" onchange="set4GMode()">
                     <option value="2" selected>Auto (2G/3G/4G)</option>
@@ -554,8 +606,10 @@
     </div>
 
     <script>
-        let currentPriority = 'wifi';
-        let autoSwitch = true;
+        let currentMode = 'prefer_4g';
+        let currentCellularDriver = 'sim7600_qmi';
+        let cellularModuleApplying = false;
+        let cloudWifiFallback = true;
         let autoReconnect = true;
         let last4gConnected = null;
         
@@ -571,51 +625,176 @@
         // Load settings on page load
         window.onload = function() {
             loadSettings();
+            loadCellularModule();
             load4GMode();
             updateConnectionStatus();
             setInterval(updateConnectionStatus, 2000);
         };
 
+        function loadCellularModule() {
+            fetch('/api/network/cellular/module')
+                .then(response => response.json())
+                .then(data => {
+                    if (!data || data.success === false) {
+                        document.getElementById('cellularModuleStatus').textContent = 'Không đọc được cấu hình module';
+                        return;
+                    }
+                    currentCellularDriver = data.driver || 'sim7600_qmi';
+                    highlightCellularModule(currentCellularDriver);
+                    updateCellularModuleStatus(data);
+                    document.getElementById('ratProfile').value = data.rat_profile || 'stability';
+                    document.getElementById('sim8262RatRow').style.display =
+                        currentCellularDriver === 'sim8262_pcie' ? 'flex' : 'none';
+                    document.getElementById('fourGModeRow').style.display =
+                        currentCellularDriver === 'sim7600_qmi' ? 'flex' : 'none';
+                })
+                .catch(() => {
+                    document.getElementById('cellularModuleStatus').textContent = 'Lỗi tải cấu hình module';
+                });
+        }
+
+        function highlightCellularModule(driver) {
+            ['sim7600_qmi', 'sim8262_pcie'].forEach(id => {
+                const el = document.getElementById('module-' + id);
+                if (el) {
+                    el.classList.toggle('active', id === driver);
+                }
+            });
+        }
+
+        function updateCellularModuleStatus(data) {
+            const line = document.getElementById('cellularModuleStatus');
+            const gen = data.generation || (data.driver === 'sim8262_pcie' ? 5 : 4);
+            const radio = data.radio_access || (gen >= 5 ? 'NR' : 'LTE');
+            const ready = data.modem_ready === true ? 'sẵn sàng' : 'chưa active';
+            const ip = data.modem_ip || data.cellular_link?.ip || '—';
+            line.textContent =
+                `Đang dùng: ${data.driver_label || data.driver} | ${gen}G/${radio} | Modem ${ready} | IP: ${ip}`;
+        }
+
+        function selectCellularModule(driver) {
+            if (cellularModuleApplying || driver === currentCellularDriver) {
+                highlightCellularModule(currentCellularDriver);
+                return;
+            }
+            const labels = {
+                sim7600_qmi: 'SIM7600 4G USB',
+                sim8262_pcie: 'SIM8262-E 5G PCIe'
+            };
+            const label = labels[driver] || driver;
+            if (!confirm(`Chuyển sang module ${label}?\n\nModem sẽ khởi động lại — uplink có thể gián đoạn 1–2 phút.`)) {
+                highlightCellularModule(currentCellularDriver);
+                return;
+            }
+
+            cellularModuleApplying = true;
+            showNotification(`⏳ Đang chuyển sang ${label}...`);
+            addLog(`Chuyển module cellular → ${label}`);
+
+            fetch('/api/network/cellular/module', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ driver: driver })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    cellularModuleApplying = false;
+                    if (data.success !== false) {
+                        currentCellularDriver = data.driver || driver;
+                        highlightCellularModule(currentCellularDriver);
+                        updateCellularModuleStatus(data);
+                        document.getElementById('sim8262RatRow').style.display =
+                            currentCellularDriver === 'sim8262_pcie' ? 'flex' : 'none';
+                        document.getElementById('fourGModeRow').style.display =
+                            currentCellularDriver === 'sim7600_qmi' ? 'flex' : 'none';
+                        showNotification(`✓ ${data.message || 'Đã cập nhật module'}`);
+                        addLog(`Module cellular: ${data.driver_label || currentCellularDriver}`);
+                        setTimeout(() => {
+                            loadCellularModule();
+                            updateConnectionStatus();
+                        }, 5000);
+                    } else {
+                        highlightCellularModule(currentCellularDriver);
+                        showNotification(`✗ ${data.message || 'Không đổi được module'}`, true);
+                    }
+                })
+                .catch(err => {
+                    cellularModuleApplying = false;
+                    highlightCellularModule(currentCellularDriver);
+                    showNotification('✗ Lỗi khi đổi module cellular', true);
+                    console.error(err);
+                });
+        }
+
+        function saveRatProfile() {
+            const ratProfile = document.getElementById('ratProfile').value;
+            fetch('/api/network/cellular/module', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    driver: 'sim8262_pcie',
+                    rat_profile: ratProfile
+                })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success !== false) {
+                        showNotification(`✓ RAT profile: ${ratProfile}`);
+                        addLog(`RAT profile → ${ratProfile}`);
+                    }
+                })
+                .catch(err => console.error('RAT profile save failed:', err));
+        }
+
         function loadSettings() {
             Promise.all([
-                fetch('/api/network/priority').then(response => response.json()),
+                fetch('/api/network/mode').then(response => response.json()),
                 Promise.resolve(JSON.parse(localStorage.getItem('connectionUiSettings') || '{}'))
             ])
-                .then(([priorityData, localSettings]) => {
-                    currentPriority = (priorityData && priorityData.priority) || 'wifi';
-                    autoSwitch = localSettings.auto_switch !== false;
+                .then(([modeData, localSettings]) => {
+                    currentMode = (modeData && modeData.mode) || 'prefer_4g';
+                    cloudWifiFallback = modeData.cloud_wifi_fallback !== false;
                     autoReconnect = localSettings.auto_reconnect !== false;
 
                     const wifiThreshold = Number.isFinite(localSettings.wifi_threshold) ? localSettings.wifi_threshold : -70;
                     const timeout = Number.isFinite(localSettings.timeout) ? localSettings.timeout : 10;
 
-                    document.querySelectorAll('.priority-option').forEach(opt => opt.classList.remove('active'));
-                    document.getElementById('priority-' + currentPriority).classList.add('active');
-                    document.getElementById('autoSwitch').classList.toggle('active', autoSwitch);
+                    highlightMode(currentMode);
+                    updateModeStatusLine(modeData);
+                    document.getElementById('cloudWifiFallback').classList.toggle('active', cloudWifiFallback);
                     document.getElementById('autoReconnect').classList.toggle('active', autoReconnect);
                     document.getElementById('wifiThreshold').value = String(wifiThreshold);
                     document.getElementById('timeout').value = String(timeout);
                 })
                 .catch(() => {
-                    document.querySelectorAll('.priority-option').forEach(opt => opt.classList.remove('active'));
-                    document.getElementById('priority-' + currentPriority).classList.add('active');
+                    highlightMode(currentMode);
                 });
         }
 
-        function setPriority(priority) {
-            currentPriority = priority;
-            document.querySelectorAll('.priority-option').forEach(opt => {
-                opt.classList.remove('active');
-            });
-            document.getElementById('priority-' + priority).classList.add('active');
-            
-            addLog(`Connection priority set to ${priority.toUpperCase()}`);
+        function highlightMode(mode) {
+            document.querySelectorAll('.priority-option').forEach(opt => opt.classList.remove('active'));
+            const el = document.getElementById('mode-' + mode);
+            if (el) el.classList.add('active');
         }
 
-        function toggleAutoSwitch() {
-            autoSwitch = !autoSwitch;
-            document.getElementById('autoSwitch').classList.toggle('active', autoSwitch);
-            addLog(`Auto-switching ${autoSwitch ? 'enabled' : 'disabled'}`);
+        function updateModeStatusLine(modeData) {
+            const line = document.getElementById('modeStatusLine');
+            if (!line || !modeData) return;
+            const active = modeData.active_interface || '—';
+            const reason = modeData.route_reason ? ` (${modeData.route_reason})` : '';
+            line.textContent = `Mode: ${modeData.mode || currentMode} · Uplink hiện tại: ${active}${reason}`;
+        }
+
+        function selectMode(mode) {
+            currentMode = mode;
+            highlightMode(mode);
+            addLog(`Chế độ uplink: ${mode}`);
+        }
+
+        function toggleCloudWifiFallback() {
+            cloudWifiFallback = !cloudWifiFallback;
+            document.getElementById('cloudWifiFallback').classList.toggle('active', cloudWifiFallback);
+            addLog(`Fallback WiFi ${cloudWifiFallback ? 'bật' : 'tắt'}`);
         }
 
         function toggleAutoReconnect() {
@@ -626,25 +805,29 @@
 
         function saveSettings() {
             const uiSettings = {
-                auto_switch: autoSwitch,
                 auto_reconnect: autoReconnect,
                 wifi_threshold: parseInt(document.getElementById('wifiThreshold').value, 10),
                 timeout: parseInt(document.getElementById('timeout').value, 10)
             };
 
-            fetch('/api/network/priority', {
+            fetch('/api/network/mode', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ priority: currentPriority })
+                body: JSON.stringify({
+                    mode: currentMode,
+                    cloud_wifi_fallback: cloudWifiFallback
+                })
             })
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
                         localStorage.setItem('connectionUiSettings', JSON.stringify(uiSettings));
-                        showNotification('✓ Settings saved successfully');
-                        addLog(`Priority saved: ${currentPriority.toUpperCase()}`);
+                        showNotification('✓ Đã lưu chế độ uplink');
+                        addLog(`Mode saved: ${currentMode}`);
+                        updateModeStatusLine(data);
+                        setTimeout(updateConnectionStatus, 2500);
                     } else {
                         showNotification(`✗ ${data.message || 'Failed to save settings'}`, true);
                     }
@@ -669,11 +852,11 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        currentPriority = target;
-                        document.querySelectorAll('.priority-option').forEach(opt => opt.classList.remove('active'));
-                        document.getElementById('priority-' + target).classList.add('active');
-                        showNotification(`✓ Switched to ${networkName} (triggered)`);
-                        addLog(`Network switch triggered: ${networkName}`);
+                        currentMode = data.mode || (target === 'wifi' ? 'wifi_only' : 'prefer_4g');
+                        highlightMode(currentMode);
+                        showNotification(`✓ Đã chuyển sang ${networkName} (mode=${currentMode})`);
+                        addLog(`Network switch: ${networkName} → ${currentMode}`);
+                        updateModeStatusLine(data);
                         setTimeout(updateConnectionStatus, 2500);
                     } else {
                         showNotification(`✗ ${data.message || 'Switch failed'}`, true);
@@ -722,7 +905,11 @@
                     let wifiConnected = data.wifi && (data.wifi.status === 'connected' || data.wifi.status === 'available');
                     let wifiIP = wifiConnected ? (data.wifi.ip || data.wifi.ip_address || 'N/A') : null;
                     
-                    // 4G info
+                    // Cellular / 4G info
+                    const cellular = data.cellular || {};
+                    const cellGen = Number(cellular.generation) || 4;
+                    const cellRadio = cellular.radio_access || (cellGen >= 5 ? 'NR' : 'LTE');
+                    const cellLabel = cellGen >= 5 ? '5G/NR' : '4G/LTE';
                     let fourGConnected = data['4g'] && (data['4g'].status === 'connected' || data['4g'].status === 'available');
                     let fourGIP = fourGConnected ? (data['4g'].ip || data['4g'].ip_address || 'N/A') : null;
                     let fourGDbm = Number(data['4g']?.signal_dbm);
@@ -780,19 +967,18 @@
                         
                         // Update Active Connection card
                         if (newActiveInterface === 'wwan0' || newActiveInterface === '4g') {
-                            document.getElementById('activeConnection').textContent = '4G/LTE';
+                            document.getElementById('activeConnection').textContent = cellLabel;
                             document.getElementById('activeConnection').style.color = 'var(--accent-yellow)';
                             
                             const carrierEl = document.getElementById('currentCarrier');
                             const detailsEl = document.getElementById('carrierDetails');
                             
-                            // Lấy operator từ AT commands nếu có
-                            const operator = data['4g']?.operator || lastNetworkState.fourGOperator || 'Mobile Network';
+                            const operator = cellular.driver_label || data['4g']?.operator || lastNetworkState.fourGOperator || 'Mobile Network';
                             lastNetworkState.fourGOperator = operator;
                             
                             carrierEl.innerHTML = `📱 ${operator}`;
                             carrierEl.style.color = 'var(--accent-yellow)';
-                            detailsEl.textContent = `Type: 4G/LTE | IP: ${fourGIP}`;
+                            detailsEl.textContent = `Type: ${cellLabel} (${cellRadio}) | IP: ${fourGIP}`;
                         } else if (wifiConnected && (newActiveInterface === 'wlan0' || newActiveInterface === 'wifi' || !fourGConnected)) {
                             document.getElementById('activeConnection').textContent = 'WiFi';
                             document.getElementById('activeConnection').style.color = 'var(--accent-green)';
@@ -834,14 +1020,17 @@
                             const serverSignal = document.getElementById('serverSignal');
                             const serverStatus = document.getElementById('serverStatus');
                             
-                            if (statusData.auth_status === 'Authenticated') {
+                            if (statusData.server_reachable || statusData.auth_status === 'Authenticated') {
                                 serverSignal.style.color = 'var(--accent-green)';
                                 serverSignal.textContent = '●';
-                                serverStatus.textContent = 'Connected - Real-time';
+                                serverStatus.textContent = statusData.auth_status === 'Reconnecting'
+                                    ? 'Reconnecting...'
+                                    : 'Connected - Real-time';
                             } else {
                                 serverSignal.style.color = 'var(--accent-red)';
                                 serverSignal.textContent = '●';
-                                serverStatus.textContent = 'Disconnected';
+                                const reason = statusData.disconnect_reason ? ` - ${statusData.disconnect_reason}` : '';
+                                serverStatus.textContent = 'Disconnected' + reason;
                             }
                         })
                         .catch(err => {

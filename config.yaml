@@ -2,7 +2,6 @@ log:
     level: info
     verbose: false
     timestamp_format: time
-    # Có muốn tắt log của thư viện bên thứ ba không
     server_connection_only: false
     show_web_interaction_logs: true
     show_packet_stats: false
@@ -10,30 +9,163 @@ auth:
     enabled: true
     host: 45.117.171.237
     port: 5770
-    uuid: 00000028-0000-0000-0000-000000000028
+    uuid: 9f14f259-576c-41ad-90f9-783e6d831455
     shared_secret: drone-fleet-shared-secret-auth-key-2025
+    vehicle_type: 0
+    model: ""
     keepalive_interval: 30
-    session_heartbeat_frequency: 1.0
+    reconnect_interval: 300
+    startup_retry_interval: 15
+    session_heartbeat_frequency: 1
+cellular:
+    enabled: true
+    driver: sim8262_pcie
+    iface: wwan0
+    apn: ""
+    qmi_dev: ""
+    normalize_iface: true
+    sim7600:
+        gpio_power: true
+    sim8262:
+        data_iface: rmnet0
+        parent_iface: mhi_hwip0
+        rat_profile: stability
 network:
-    local_listen_port: 14540
+    local_listen_port: 14550
     target_host: 10.8.0.1
     target_port: 14550
     protocol: udp
-    connection_type: serial
-    serial_port: /dev/ttyAMA0
-    serial_baud: 57600
-    # Chế độ kết nối: "4g_only", "wifi_only", "prefer_4g"
+    connection_type: prefer_ethernet
+    serial_port: /dev/ttyAMA2
+    serial_baud: 1500000
+    telem2_port: /dev/ttyAMA2
+    telem2_baud: 1500000
+    telem3_port: /dev/ttyAMA3
+    telem3_baud: 1500000
+    link_loss_timeout_ms: 2000
+    eth_recover_heartbeats: 2
     mode: prefer_4g
-    # Giây chờ trước khi fallback sang WiFi (mặc định 300 = 5 phút)
+    cloud_wifi_fallback: false
+    forward_gps_raw_int: false
     fallback_delay: 300
 ethernet:
-    interface: ""
-    local_ip: ""
-    broadcast_ip: ""
-    pixhawk_ip: ""
-    auto_setup: false
-#     subnet: "24"
-#     allow_missing_pixhawk: true
-#     pixhawk_connection_timeout: 30
+    interface: end0
+    local_ip: 10.41.10.10
+    broadcast_ip: 10.41.10.255
+    pixhawk_ip: 10.41.10.2
+    pixhawk_port: 14550
+    auto_setup: true
+    subnet: "24"
+    allow_missing_pixhawk: true
+    pixhawk_connection_timeout: 30
 web:
     port: 8080
+camera:
+    enabled: true
+    auto_start: true
+    auto_setup: true
+    config_file: ""
+    stream_path: ""
+    mediamtx_host: ""
+    mediamtx_port: 8554
+    mediamtx_webrtc_port: 8889
+    mediamtx_hls_port: 8888
+    publish_path_cam0_suffix: cam0
+    publish_path_cam1_suffix: cam1
+    primary_camera_id: 0
+    auto_memory_profile: true
+    low_memory_mode: false
+    stream_buffer_count: 3
+    skip_missing_sensors: true
+    mediamtx_relay_host: ""
+    mavlink_status_enabled: null
+    mavlink_status_hz: 1
+    streams:
+        - name: cam0
+          camera_id: 0
+          enabled: true
+          size:
+            - 640
+            - 480
+          framerate: 30
+          bitrate: 5000
+          format: BGR888
+          brightness: 0
+          contrast: 1
+          sharpness: 1.5
+          saturation: 1
+          exposure_time: 0
+          detection_enabled: true
+          overlay_enabled: true
+          overlay_burn_enabled: true
+          gate_timeout_ms: 0
+          detect_frame_skip: 3
+          landing_detection_mode: ""
+          aruco_marker_id: 0
+          aruco_dictionary: ""
+          detection_threshold: 0.8
+          landing_fullframe_fallback: true
+          overlay_frame_skip: 5
+          lores_size:
+            - 320
+            - 240
+          keyframe_interval: 30
+          preset: veryfast
+          tune: zerolatency
+        - name: cam1
+          camera_id: 1
+          enabled: true
+          size:
+            - 640
+            - 480
+          framerate: 30
+          bitrate: 5000
+          format: BGR888
+          brightness: 0
+          contrast: 1
+          sharpness: 1.5
+          saturation: 1
+          exposure_time: 0
+          detection_enabled: true
+          overlay_enabled: true
+          overlay_burn_enabled: true
+          gate_timeout_ms: 0
+          detect_frame_skip: 3
+          landing_detection_mode: ""
+          aruco_marker_id: 0
+          aruco_dictionary: ""
+          detection_threshold: 0.8
+          landing_fullframe_fallback: true
+          overlay_frame_skip: 5
+          lores_size:
+            - 320
+            - 240
+          keyframe_interval: 30
+          preset: veryfast
+          tune: zerolatency
+landing:
+    environment: outdoor
+    marker_type: H
+    mode: normal
+    safety_level: 2
+    template: H
+    mavlink_enabled: false
+    mavlink_hz: 10
+    mavlink_camera_id: 1
+lcd:
+    enabled: true
+    auto_setup: true
+    overlay: i2c3-pi5
+    pins: pins_22_23
+    bus: 3
+    address: 60
+    interval: 1
+    screen_hold: 5
+    screen: alt
+vpn:
+    enabled: true
+    config_file: vpn_config.json
+    server_endpoint: 45.117.171.237:51820
+    server_pub_key: ""
+    vpn_port: 14550
+    router_vpn_ip: 10.8.0.1

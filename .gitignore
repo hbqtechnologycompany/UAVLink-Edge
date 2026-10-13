@@ -1,3 +1,31 @@
 bin/
 build_tmp/
 /home/thinh/Desktop/ConnectedDrone/Run_serverGo/stimulate_n_drone/px4_instances
+
+# Thiết bị / runtime — tạo trên CM5 khi chạy, không đẩy git
+.drone_secret
+vpn_config.json
+dronebridge
+dronebridge.exe
+
+# Trạng thái runtime (4G/netmon, web UI)
+data/connection_status.json
+data/connection_config.json
+
+# Cấu hình local / test
+config-test.yaml
+docker/.env
+
+# Runtime flags trên thiết bị (setup scripts)
+.need_host_reboot
+.need_lcd_reboot
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Runtime camera detection trên thiết bị
+Find_landing/camera_detected.json
+
+# Phiên QMI runtime của SIM8262
+third_party/sim8262/ip-session-*

@@ -1,0 +1,52 @@
+{
+  "camera_id": 1,
+  "size": [
+    640,
+    480
+  ],
+  "framerate": 30,
+  "format": "BGR888",
+  "mediamtx_host": "45.117.171.237",
+  "mediamtx_port": 8554,
+  "mediamtx_webrtc_port": 8889,
+  "mediamtx_hls_port": 8888,
+  "publish_path": "/9f14f259-576c-41ad-90f9-783e6d831455/cam1",
+  "drone_id": "9f14f259-576c-41ad-90f9-783e6d831455",
+  "bitrate": 5000,
+  "overlay_enabled": true,
+  "overlay_burn_enabled": true,
+  "detection_enabled": true,
+  "gate_timeout_ms": 0,
+  "detect_frame_skip": 3,
+  "detection_threshold": 0.8,
+  "landing_detection_mode": "contour_h",
+  "aruco_marker_id": 0,
+  "aruco_dictionary": "DICT_4X4_50",
+  "landing_fullframe_fallback": true,
+  "overlay_frame_skip": 5,
+  "lores_size": [
+    320,
+    240
+  ],
+  "external_landing": false,
+  "rtsp_backend": "ffmpeg",
+  "multi_camera": true,
+  "keyframe_interval": 30,
+  "preset": "veryfast",
+  "tune": "zerolatency",
+  "brightness": 0,
+  "contrast": 1,
+  "sharpness": 1.5,
+  "saturation": 1,
+  "exposure_time": 0,
+  "buffer_count": 3,
+  "low_memory_mode": false,
+  "encode_size": [
+    640,
+    480
+  ],
+  "memory_tier_gb": 8,
+  "memory_profile_applied": true,
+  "stream_role": "secondary",
+  "physical_camera_id": 1
+}

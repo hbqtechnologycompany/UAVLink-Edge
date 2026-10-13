@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -13,15 +14,31 @@ import (
 	"sync"
 	"time"
 
-	"UAVLink-Edge/metrics"
+	"DroneBridge/metrics"
+	"DroneBridge/network"
+	"DroneBridge/vpn"
 )
 
 var (
-	authForceFreshConn = strings.ToLower(strings.TrimSpace(os.Getenv("UAVLINK_EDGE_AUTH_FORCE_FRESH_CONN"))) != "0"
-	authChallengeReadTimeout = envDurationSeconds("UAVLINK_EDGE_AUTH_CHALLENGE_TIMEOUT_S", 15)
-	authAckReadTimeout = envDurationSeconds("UAVLINK_EDGE_AUTH_ACK_TIMEOUT_S", 15)
-	refreshAckReadTimeout = envDurationSeconds("UAVLINK_EDGE_REFRESH_ACK_TIMEOUT_S", 8)
+	authForceFreshConn = strings.ToLower(strings.TrimSpace(os.Getenv("DRONEBRIDGE_AUTH_FORCE_FRESH_CONN"))) != "0"
+	authChallengeReadTimeout = envDurationSeconds("DRONEBRIDGE_AUTH_CHALLENGE_TIMEOUT_S", 15)
+	authAckReadTimeout = envDurationSeconds("DRONEBRIDGE_AUTH_ACK_TIMEOUT_S", 15)
+	refreshAckReadTimeout = envDurationSeconds("DRONEBRIDGE_REFRESH_ACK_TIMEOUT_S", 8)
 )
+
+// DisconnectCause classifies why the server session is unreachable.
+type DisconnectCause string
+
+const (
+	DisconnectNone            DisconnectCause = ""
+	DisconnectNetwork         DisconnectCause = "network_error"
+	DisconnectSessionInvalid  DisconnectCause = "session_invalid"
+	DisconnectAuthFailed      DisconnectCause = "auth_failed"
+	DisconnectServerTransient DisconnectCause = "server_transient"
+)
+
+// ErrRefreshSkipped means refresh was intentionally skipped (e.g. recent IP change).
+var ErrRefreshSkipped = errors.New("session refresh skipped")
 
 func envDurationSeconds(key string, defaultSec int) time.Duration {
 	v := strings.TrimSpace(os.Getenv(key))
@@ -53,8 +70,14 @@ type Client struct {
 	stopCh            chan struct{}
 	mu                sync.RWMutex
 	tcpMu             sync.Mutex // For synchronizing TCP operations
-	reconnectDelay    time.Duration
-	previousLocalIP   string        // Track previous local IP for change detection
+	reconnectDelay     time.Duration
+	reconnectInterval  time.Duration
+	nextReconnectAt    time.Time
+	serverReachable    bool
+	everConnected      bool
+	disconnectCause    DisconnectCause
+	lastRefreshOK      time.Time
+	previousLocalIP    string        // Track previous local IP for change detection
 	lastIPChangeTime  time.Time     // Track last IP change time
 	ipChangeThreshold time.Duration // Minimum time between IP changes before retrying refresh
 
@@ -65,8 +88,20 @@ type Client struct {
 	apiKeyDeleteAckCh   chan *APIKeyDeleteAck
 	sessionRefreshAckCh chan *SessionRefreshAck
 
-	OnNetworkError  func()       // Callback when network error is detected
-	OnStatusMessage func(string) // Callback for status messages (for UI)
+	OnNetworkError    func()            // Callback when network error is detected
+	OnDisconnectCause func(DisconnectCause) // Callback with classified disconnect reason
+	OnSessionRestored func()            // Callback when TCP session verified / auth recovered
+	OnStatusMessage   func(string)      // Callback for status messages (for UI)
+
+	// VPN Provisioning
+	vpnManager   *vpn.Manager
+	vpnReadyCh   chan struct{}
+	vpnPublicKey string
+	vpnRouterIP  string
+
+	// One-time registration metadata (REGISTER_INIT v2)
+	vehicleType uint8
+	model       string
 }
 
 // NewClient creates a new authentication client using UUID-based protocol
@@ -87,12 +122,14 @@ func NewClient(host string, port int, droneUUID string, sharedSecret string, kee
 		keepaliveInterval:   time.Duration(keepaliveInterval) * time.Second,
 		stopCh:              make(chan struct{}),
 		reconnectDelay:      5 * time.Second,
+		reconnectInterval:   5 * time.Minute,
 		ipChangeThreshold:   10 * time.Second,
 		apiKeyRespCh:        make(chan *APIKeyResponse, 1),
 		apiKeyRevokeAckCh:   make(chan *APIKeyRevokeAck, 1),
 		apiKeyStatusCh:      make(chan *APIKeyStatusResponse, 1),
 		apiKeyDeleteAckCh:   make(chan *APIKeyDeleteAck, 1),
 		sessionRefreshAckCh: make(chan *SessionRefreshAck, 1),
+		vpnReadyCh:          make(chan struct{}),
 	}
 }
 
@@ -107,16 +144,25 @@ func (c *Client) resolveDialTarget() (string, bool) {
 }
 
 // dialWithLocalIP creates a TCP connection.
-// TCP auth/refresh ONLY uses the public network to maximize stability over intermittent 4G.
+// TCP auth/refresh ONLY uses the public network (không qua VPN tunnel).
+// Routing egress theo PBR table 100 — netmon quyết định wwan0/wlan0 (SYSTEM_ARCHITECTURE.md §7.1).
 func (c *Client) dialWithLocalIP() (net.Conn, error) {
 	targetHost, _ := c.resolveDialTarget()
 	publicTarget := fmt.Sprintf("%s:%d", targetHost, c.port)
+	return network.DialTCP(10*time.Second, "tcp", publicTarget)
+}
 
-	// We intentionally do not use c.vpnManager.DialContextTCP here anymore.
-	// TCP traffic goes via standard routing.
-
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	return dialer.Dial("tcp", publicTarget)
+func (c *Client) logDialEgress(conn net.Conn) {
+	socketIP := ""
+	if tcpAddr, ok := conn.LocalAddr().(*net.TCPAddr); ok && tcpAddr.IP != nil {
+		socketIP = tcpAddr.IP.String()
+	}
+	iface, egressIP, ok := network.PhysicalEgress()
+	if ok && egressIP != "" {
+		log.Printf("[AUTH] ✓ Connected (socket=%s, PBR egress=%s via %s)", socketIP, egressIP, iface)
+		return
+	}
+	log.Printf("[AUTH] ✓ Connected from local IP: %s", socketIP)
 }
 
 // getOrGenerateUUID attempts to retrieve a persistent UUID for this drone
@@ -207,10 +253,154 @@ func (c *Client) Start() error {
 	c.running = true
 	c.mu.Unlock()
 
-	// Start keepalive goroutine
+	// Start keepalive goroutine (immediate SESSION_REFRESH happens inside keepaliveLoop).
 	go c.keepaliveLoop()
 
-	log.Printf("[AUTH] ✅ Authenticated - keepalive active every %.0fs", c.keepaliveInterval.Seconds())
+	c.mu.RLock()
+	interval := c.refreshInterval
+	if interval == 0 {
+		interval = 30 * time.Second
+	}
+	c.mu.RUnlock()
+	log.Printf("[AUTH] ✅ Authenticated - keepalive active every %.0fs", interval.Seconds())
+	return nil
+}
+
+// SetRegistrationMeta sets vehicle_type and model for REGISTER_INIT v2.
+// Trailer is omitted when both are zero/empty (legacy v1 packet).
+func (c *Client) SetRegistrationMeta(vehicleType uint8, model string) {
+	if len(model) > MaxRegisterModelLen {
+		model = model[:MaxRegisterModelLen]
+	}
+	c.mu.Lock()
+	c.vehicleType = vehicleType
+	c.model = model
+	c.mu.Unlock()
+}
+
+// Register performs the one-time registration process
+// Flow: REGISTER_INIT(UUID) → REGISTER_CHALLENGE → REGISTER_RESPONSE(HMAC-Shared) → REGISTER_ACK(Secret+Session)
+func (c *Client) Register() error {
+	if c.sharedSecret == "" {
+		return fmt.Errorf("shared secret is required for registration")
+	}
+
+	log.Printf("========================================")
+	log.Printf("⚠️  [REGISTER] ONE-TIME REGISTRATION STARTING")
+	log.Printf("⚠️  [REGISTER] UUID: %s", c.droneUUID)
+	log.Printf("⚠️  [REGISTER] This should only happen ONCE.")
+	log.Printf("⚠️  [REGISTER] If you see this repeatedly, --register")
+	log.Printf("⚠️  [REGISTER] must NOT be in the systemd service file!")
+	log.Printf("========================================")
+	targetHost, _ := c.resolveDialTarget()
+	log.Printf("[REGISTER] Connecting to %s:%d...", targetHost, c.port)
+
+	// Connect to auth server (using local bind IP if configured)
+	conn, err := c.dialWithLocalIP()
+	if err != nil {
+		return fmt.Errorf("connection failed: %w", err)
+	}
+	// DO NOT defer conn.Close() - we want to keep this connection alive!
+
+	// Enable TCP keepalive to prevent disconnects
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(30 * time.Second)
+		log.Printf("[REGISTER] ✓ TCP keepalive enabled (30s interval)")
+	}
+
+	// Step 1: Send REGISTER_INIT
+	c.mu.RLock()
+	vehicleType := c.vehicleType
+	model := c.model
+	c.mu.RUnlock()
+
+	init := &RegisterInit{
+		DroneUUID:   c.droneUUID,
+		VehicleType: vehicleType,
+		Model:       model,
+	}
+
+	packet := SerializeRegisterInit(init)
+	if _, err := conn.Write(packet); err != nil {
+		return fmt.Errorf("failed to send REGISTER_INIT: %w", err)
+	}
+	if vehicleType != 0 || model != "" {
+		log.Printf("[REGISTER] ▶ REGISTER_INIT v2 sent → server (UUID=%s, vehicle_type=%d, model=%q)", c.droneUUID, vehicleType, model)
+	} else {
+		log.Printf("[REGISTER] ▶ REGISTER_INIT sent → server (UUID=%s)", c.droneUUID)
+	}
+
+	// Step 2: Receive REGISTER_CHALLENGE
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	buf := make([]byte, 4096)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return fmt.Errorf("failed to receive REGISTER_CHALLENGE: %w", err)
+	}
+
+	challenge, err := ParseRegisterChallenge(buf[:n])
+	if err != nil {
+		return fmt.Errorf("failed to parse REGISTER_CHALLENGE: %w", err)
+	}
+	log.Printf("[REGISTER] ✓ Received challenge")
+
+	// Step 3: Compute HMAC with SHARED SECRET
+	timestamp := uint64(time.Now().Unix())
+	hmacSig := ComputeHMAC(c.sharedSecret, c.droneUUID, challenge.Nonce, timestamp)
+
+	// Step 4: Send REGISTER_RESPONSE
+	resp := &RegisterResponse{
+		DroneUUID: c.droneUUID,
+		HMAC:      hmacSig,
+		Timestamp: timestamp,
+	}
+
+	packet = SerializeRegisterResponse(resp)
+	if _, err := conn.Write(packet); err != nil {
+		return fmt.Errorf("failed to send REGISTER_RESPONSE: %w", err)
+	}
+	log.Printf("[REGISTER] ✓ Sent REGISTER_RESPONSE")
+
+	// Step 5: Receive REGISTER_ACK with SECRET (no session)
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	n, err = conn.Read(buf)
+	if err != nil {
+		return fmt.Errorf("failed to receive REGISTER_ACK: %w", err)
+	}
+
+	ack, err := ParseRegisterAck(buf[:n])
+	if err != nil {
+		return fmt.Errorf("failed to parse REGISTER_ACK: %w", err)
+	}
+
+	if ack.Result != ResultSuccess {
+		return fmt.Errorf("registration failed (error=%d)", ack.ErrorCode)
+	}
+
+	log.Printf("[REGISTER] ✅ Registration successful!")
+	log.Printf("[REGISTER] 🔑 Received SECRET KEY (len=%d)", len(ack.SecretKey))
+
+	// Step 6: Save Secret Key
+	if err := SaveSecret(c.droneUUID, ack.SecretKey); err != nil {
+		return fmt.Errorf("failed to save secret key: %w", err)
+	}
+	log.Printf("[REGISTER] 💾 Secret key saved to '%s'", SecretFileName)
+
+	// Step 7: Close connection - session will be obtained via AUTH flow
+	// This prevents duplicate session creation issue
+	conn.Close()
+	log.Printf("[REGISTER] ✅ Registration complete. Connection closed.")
+
+	c.mu.Lock()
+	c.secret = ack.SecretKey
+	c.conn = nil        // Connection closed, will reconnect during AUTH
+	c.sessionToken = "" // No session from REGISTER (will get from AUTH)
+	c.expiresAt = time.Time{}
+	c.mu.Unlock()
+
+	log.Printf("[REGISTER] ℹ️  Session will be obtained during AUTH flow (Start())")
+
 	return nil
 }
 
@@ -290,12 +480,115 @@ func (c *Client) GetSessionRefreshPacket() ([]byte, error) {
 	return SerializeSessionRefresh(req), nil
 }
 
-// IsAuthenticated returns true if the client has a valid session
+// SetReconnectInterval sets how long to wait between full reconnect attempts after failure.
+func (c *Client) SetReconnectInterval(seconds int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if seconds <= 0 {
+		seconds = 300
+	}
+	c.reconnectInterval = time.Duration(seconds) * time.Second
+}
+
+func (c *Client) markConnected() {
+	now := time.Now()
+	c.mu.Lock()
+	c.serverReachable = true
+	c.everConnected = true
+	c.disconnectCause = DisconnectNone
+	c.nextReconnectAt = time.Time{}
+	c.lastRefreshOK = now
+	c.mu.Unlock()
+
+	metrics.Global.SetAuthStatus("Authenticated")
+	metrics.Global.SetDisconnectReason("")
+	metrics.Global.SetLastRefreshOK(now)
+
+	if c.OnSessionRestored != nil {
+		go c.OnSessionRestored()
+	}
+}
+
+func (c *Client) markDisconnected(cause DisconnectCause) {
+	c.mu.Lock()
+	c.serverReachable = false
+	c.disconnectCause = cause
+	c.mu.Unlock()
+
+	metrics.Global.SetAuthStatus("Disconnected")
+	metrics.Global.SetDisconnectReason(string(cause))
+	metrics.Global.AddLog("WARN", fmt.Sprintf("Server disconnected: %s", cause))
+
+	if c.OnDisconnectCause != nil {
+		go c.OnDisconnectCause(cause)
+	}
+	if cause == DisconnectNetwork && c.OnNetworkError != nil {
+		go c.OnNetworkError()
+	}
+}
+
+func (c *Client) scheduleReconnectBackoff() {
+	c.mu.RLock()
+	ever := c.everConnected
+	interval := c.reconnectInterval
+	c.mu.RUnlock()
+	if !ever {
+		// Boot / never connected: keep retrying on keepalive interval, not 5-minute backoff.
+		return
+	}
+	c.mu.Lock()
+	c.nextReconnectAt = time.Now().Add(interval)
+	next := c.nextReconnectAt
+	c.mu.Unlock()
+	log.Printf("[RECONNECT] ⏳ Next full reconnect attempt at %s (interval %.0fs)",
+		next.Format("15:04:05"), interval.Seconds())
+}
+
+func (c *Client) reconnectBackoffActive() bool {
+	c.mu.RLock()
+	ever := c.everConnected
+	next := c.nextReconnectAt
+	c.mu.RUnlock()
+	if !ever {
+		return false
+	}
+	return !next.IsZero() && time.Now().Before(next)
+}
+
+// IsAuthenticated returns true only when the server session was verified recently.
 func (c *Client) IsAuthenticated() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return c.sessionToken != "" && time.Now().Before(c.expiresAt)
+	if !c.serverReachable {
+		return false
+	}
+	if c.sessionToken == "" || !time.Now().Before(c.expiresAt) {
+		return false
+	}
+	// Stale if no successful refresh for too long (server may have restarted).
+	staleAfter := c.refreshInterval * 2
+	if staleAfter == 0 {
+		staleAfter = 60 * time.Second
+	}
+	if !c.lastRefreshOK.IsZero() && time.Since(c.lastRefreshOK) > staleAfter {
+		return false
+	}
+	return true
+}
+
+// IsServerReachable reports live TCP/session health (not just local token expiry).
+func (c *Client) IsServerReachable() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.serverReachable
+}
+
+// GetDisconnectCause returns the last classified disconnect reason.
+func (c *Client) GetDisconnectCause() DisconnectCause {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.disconnectCause
 }
 
 // authenticate performs the authentication handshake (UUID-based with Secret Key)
@@ -356,11 +649,10 @@ func (c *Client) authenticate() error {
 		c.mu.Lock()
 		c.conn = newConn
 		c.previousLocalIP = newConn.LocalAddr().(*net.TCPAddr).IP.String()
-		c.lastIPChangeTime = time.Now()
 		c.mu.Unlock()
 
 		conn = newConn
-		log.Printf("[AUTH] ✓ Connected from local IP: %s", c.previousLocalIP)
+		c.logDialEgress(newConn)
 	} else {
 		log.Printf("[AUTH] ✓ Reusing existing connection from REGISTER")
 	}
@@ -459,7 +751,6 @@ func (c *Client) authenticate() error {
 	}
 
 	log.Printf("[AUTH] ✅ Authentication successful! (identity verified)")
-	metrics.Global.SetAuthStatus("Authenticated")
 	metrics.Global.AddLog("INFO", "Authentication successful - UUID: "+c.droneUUID)
 
 	// Store session info
@@ -470,6 +761,7 @@ func (c *Client) authenticate() error {
 	c.mu.Unlock()
 
 	metrics.Global.SetSessionInfo(c.expiresAt, c.refreshInterval)
+	c.markConnected()
 
 	log.Printf("[SESSION] ✅ Session ready!")
 	log.Printf("[SESSION]    Token: %s...", c.sessionToken[:20])
@@ -526,6 +818,7 @@ func (c *Client) requestSession(conn net.Conn) error {
 
 	// Update metrics
 	metrics.Global.SetSessionInfo(c.expiresAt, c.refreshInterval)
+	c.markConnected()
 
 	log.Printf("[SESSION] ✅ Session ready!")
 	log.Printf("[SESSION]    Token: %s...", c.sessionToken[:20])
@@ -571,7 +864,7 @@ func (c *Client) sendRefresh() error {
 	// Skip refresh if IP changed too recently (avoid re-auth loop)
 	if timeSinceIPChange < c.ipChangeThreshold {
 		log.Printf("[SESSION_REFRESH] ⏭️ Skipping (IP changed %v ago, threshold: %v)", timeSinceIPChange, c.ipChangeThreshold)
-		return nil
+		return ErrRefreshSkipped
 	}
 
 	if token == "" {
@@ -635,7 +928,131 @@ func (c *Client) sendRefresh() error {
 	log.Printf("[SESSION_REFRESH] ✓ Session extended (expires: %s)",
 		time.Unix(int64(ackResp.ExpiresAt), 0).Format("15:04:05"))
 
+	c.markConnected()
 	return nil
+}
+
+// handleRefreshFailure classifies the error, updates status, and attempts recovery.
+func (c *Client) handleRefreshFailure(err error) {
+	if errors.Is(err, ErrRefreshSkipped) {
+		return
+	}
+
+	var needReauth bool
+	var isNetworkError bool
+	var isTransientServerError bool
+	var cause DisconnectCause
+
+	if refreshErr, ok := err.(*RefreshError); ok {
+		switch refreshErr.ErrorCode {
+		case ErrInvalidToken, ErrSessionExpired:
+			needReauth = true
+			cause = DisconnectSessionInvalid
+		case ErrInternalError, ErrRateLimited:
+			isTransientServerError = true
+			cause = DisconnectServerTransient
+		default:
+			isNetworkError = true
+			cause = DisconnectNetwork
+		}
+	} else {
+		isNetworkError = true
+		cause = DisconnectNetwork
+	}
+
+	if isTransientServerError {
+		c.markDisconnected(cause)
+		log.Printf("[REFRESH] ⏭️ Server transient error, keeping TCP and retrying next cycle")
+		return
+	}
+
+	c.markDisconnected(cause)
+
+	if c.reconnectBackoffActive() {
+		c.mu.RLock()
+		next := c.nextReconnectAt
+		c.mu.RUnlock()
+		log.Printf("[REFRESH] ⏳ Reconnect backoff active — next attempt at %s", next.Format("15:04:05"))
+		return
+	}
+
+	metrics.Global.SetAuthStatus("Reconnecting")
+
+	if isNetworkError {
+		log.Printf("[REFRESH] 🔌 Network error detected, closing connection for clean reconnect")
+		c.mu.Lock()
+		if c.conn != nil {
+			c.conn.Close()
+			c.conn = nil
+		}
+		c.mu.Unlock()
+	}
+
+	recovered := false
+
+	if needReauth {
+		log.Printf("[REFRESH] 🔄 Re-authenticating (session invalid on server)...")
+		if err := c.authenticate(); err != nil {
+			log.Printf("[AUTH] ❌ Re-authentication failed: %v", err)
+			c.markDisconnected(DisconnectAuthFailed)
+		} else {
+			log.Printf("[AUTH] ✅ Re-authentication successful - Session recovered!")
+			recovered = true
+		}
+	} else if isNetworkError {
+		c.mu.RLock()
+		tokenValid := c.sessionToken != "" && time.Now().Before(c.expiresAt)
+		c.mu.RUnlock()
+
+		if tokenValid {
+			log.Printf("[REFRESH] 🔄 Token still valid locally, reconnecting TCP...")
+			if err := c.reconnectTCP(); err != nil {
+				log.Printf("[REFRESH] ❌ TCP reconnect failed: %v - re-authenticating", err)
+				if err2 := c.authenticate(); err2 != nil {
+					log.Printf("[AUTH] ❌ Authentication failed: %v", err2)
+					c.markDisconnected(DisconnectAuthFailed)
+				} else {
+					log.Printf("[AUTH] ✅ Authentication successful - Session recovered!")
+					recovered = true
+				}
+			} else {
+				log.Printf("[REFRESH] 🔍 TCP reconnected — verifying session with server...")
+				if err2 := c.sendRefresh(); err2 != nil {
+					if errors.Is(err2, ErrRefreshSkipped) {
+						// IP change cooldown — TCP is up; wait for next refresh tick.
+					} else if rf2, ok := err2.(*RefreshError); ok &&
+						(rf2.ErrorCode == ErrInvalidToken || rf2.ErrorCode == ErrSessionExpired) {
+						log.Printf("[REFRESH] ⚠️ Session unknown after server restart (error=%d) - re-authenticating", rf2.ErrorCode)
+						if err3 := c.authenticate(); err3 != nil {
+							log.Printf("[AUTH] ❌ Re-authentication failed: %v", err3)
+							c.markDisconnected(DisconnectAuthFailed)
+						} else {
+							log.Printf("[AUTH] ✅ Re-authentication successful after server restart!")
+							recovered = true
+						}
+					} else {
+						log.Printf("[REFRESH] ⚠️ Post-reconnect refresh failed: %v (will retry next cycle)", err2)
+					}
+				} else {
+					log.Printf("[REFRESH] ✅ Session verified after TCP reconnect")
+					recovered = true
+				}
+			}
+		} else {
+			log.Printf("[REFRESH] ⚠️ Token expired, re-authenticating...")
+			if err := c.authenticate(); err != nil {
+				log.Printf("[AUTH] ❌ Re-authentication failed: %v", err)
+				c.markDisconnected(DisconnectAuthFailed)
+			} else {
+				log.Printf("[AUTH] ♻️ Re-authentication successful - Session recovered!")
+				recovered = true
+			}
+		}
+	}
+
+	if !recovered {
+		c.scheduleReconnectBackoff()
+	}
 }
 
 // keepaliveLoop runs periodic keepalive messages - TCP session refresh
@@ -653,6 +1070,17 @@ func (c *Client) keepaliveLoop() {
 
 	log.Printf("[KEEPALIVE] Starting refresh every %.0fs", refreshInterval.Seconds())
 
+	// Verify session immediately instead of waiting for first ticker fire.
+	c.mu.RLock()
+	running := c.running
+	c.mu.RUnlock()
+	if running {
+		if err := c.sendRefresh(); err != nil {
+			log.Printf("[REFRESH] ❌ Initial refresh failed: %v", err)
+			c.handleRefreshFailure(err)
+		}
+	}
+
 	for {
 		select {
 		case <-c.stopCh:
@@ -667,101 +1095,7 @@ func (c *Client) keepaliveLoop() {
 			if running {
 				if err := c.sendRefresh(); err != nil {
 					log.Printf("[REFRESH] ❌ Failed: %v", err)
-
-					// Check if this is a RefreshError with specific error code
-					var needReauth bool
-					var isNetworkError bool
-					var isTransientServerError bool
-					if refreshErr, ok := err.(*RefreshError); ok {
-						// Session not found or expired on server - MUST re-authenticate
-						if refreshErr.ErrorCode == ErrInvalidToken || refreshErr.ErrorCode == ErrSessionExpired {
-							log.Printf("[REFRESH] ⚠️ Session invalid on server (error=%d) - need full re-auth", refreshErr.ErrorCode)
-							needReauth = true
-						} else if refreshErr.ErrorCode == ErrInternalError || refreshErr.ErrorCode == ErrRateLimited {
-							// Server is alive but temporarily unable to process refresh.
-							// Keep TCP connection intact and retry on next tick.
-							isTransientServerError = true
-						} else {
-							// Any other error is likely network-related
-							isNetworkError = true
-						}
-					} else {
-						// No error code means it's a network error
-						isNetworkError = true
-					}
-
-					if isTransientServerError {
-						log.Printf("[REFRESH] ⏭️ Server transient error, keeping TCP and retrying next cycle")
-						continue
-					}
-
-					// Only close connection on network errors, NOT on SESSION_REFRESH rejection
-					// Rejection means the connection is still alive, just session issue
-					if isNetworkError {
-						log.Printf("[REFRESH] 🔌 Network error detected, closing connection for clean reconnect")
-						c.mu.Lock()
-						if c.conn != nil {
-							c.conn.Close()
-							c.conn = nil
-						}
-						c.mu.Unlock()
-					}
-
-					if needReauth {
-						// Session not found on server - re-authenticate immediately
-						log.Printf("[REFRESH] 🔄 Re-authenticating (session not found on server)...")
-						if err := c.authenticate(); err != nil {
-							log.Printf("[AUTH] ❌ Re-authentication failed: %v", err)
-						} else {
-							log.Printf("[AUTH] ✅ Re-authentication successful - Session recovered!")
-						}
-					} else if isNetworkError {
-						// Network error - try reconnecting TCP (reuse token if still valid locally)
-						c.mu.RLock()
-						tokenValid := c.sessionToken != "" && time.Now().Before(c.expiresAt)
-						c.mu.RUnlock()
-
-						if tokenValid {
-							log.Printf("[REFRESH] 🔄 Token still valid locally, reconnecting TCP...")
-							if err := c.reconnectTCP(); err != nil {
-								log.Printf("[REFRESH] ❌ TCP reconnect failed: %v - re-authenticating", err)
-								if err := c.authenticate(); err != nil {
-									log.Printf("[AUTH] ❌ Authentication failed: %v", err)
-								} else {
-									log.Printf("[AUTH] ✅ Authentication successful - Session recovered!")
-								}
-							} else {
-								// TCP is back — immediately verify that the server still knows our
-								// session (it may have restarted and lost all sessions).
-								// Without this check we'd wait a full 30s before the next tick
-								// discovers ErrInvalidToken and triggers re-auth, leaving the drone
-								// sending UDP packets the server can't route.
-								log.Printf("[REFRESH] 🔍 TCP reconnected — verifying session with server...")
-								if err2 := c.sendRefresh(); err2 != nil {
-									if rf2, ok := err2.(*RefreshError); ok &&
-										(rf2.ErrorCode == ErrInvalidToken || rf2.ErrorCode == ErrSessionExpired) {
-										log.Printf("[REFRESH] ⚠️ Session unknown after server restart (error=%d) - re-authenticating", rf2.ErrorCode)
-										if err3 := c.authenticate(); err3 != nil {
-											log.Printf("[AUTH] ❌ Re-authentication failed: %v", err3)
-										} else {
-											log.Printf("[AUTH] ✅ Re-authentication successful after server restart!")
-										}
-									} else {
-										log.Printf("[REFRESH] ⚠️ Post-reconnect refresh failed: %v (will retry next cycle)", err2)
-									}
-								} else {
-									log.Printf("[REFRESH] ✅ Session verified after TCP reconnect")
-								}
-							}
-						} else {
-							log.Printf("[REFRESH] ⚠️ Token expired, re-authenticating...")
-							if err := c.authenticate(); err != nil {
-								log.Printf("[AUTH] ❌ Re-authentication failed: %v", err)
-							} else {
-								log.Printf("[AUTH] ♻️ Re-authentication successful - Session recovered!")
-							}
-						}
-					}
+					c.handleRefreshFailure(err)
 				}
 			}
 		}
@@ -769,11 +1103,9 @@ func (c *Client) keepaliveLoop() {
 }
 
 // TriggerReauth performs immediate re-authentication (for session recovery)
-// This does full auth + session request
 func (c *Client) TriggerReauth() error {
 	log.Printf("[REAUTH] 🔄 Triggering immediate re-authentication...")
-	// Force a fresh connection validation to ensure we aren't using a stale state
-	c.ForceReconnect()
+	c.closeTCP()
 	return c.authenticate()
 }
 
@@ -886,20 +1218,42 @@ func (c *Client) reconnectTCP() error {
 	metrics.Global.SetIP(currentLocalIP)
 	c.mu.Unlock()
 
-	log.Printf("[RECONNECT] ✓ TCP reconnected successfully from local IP: %s", currentLocalIP)
+	c.logDialEgress(conn)
 	return nil
 }
 
-// ForceReconnect closes the current connection to trigger an immediate reconnect
+// ForceReconnect closes the current TCP connection and immediately attempts session recovery.
 func (c *Client) ForceReconnect() {
+	if !c.closeTCP() {
+		return
+	}
+
+	c.mu.RLock()
+	running := c.running
+	c.mu.RUnlock()
+	if !running {
+		return
+	}
+
+	go func() {
+		log.Println("[AUTH] ForceReconnect: recovering session immediately...")
+		if err := c.TriggerSessionRecovery(); err != nil {
+			log.Printf("[AUTH] ForceReconnect recovery failed: %v", err)
+			c.handleRefreshFailure(&RefreshError{Message: err.Error()})
+		}
+	}()
+}
+
+func (c *Client) closeTCP() bool {
 	c.tcpMu.Lock()
 	defer c.tcpMu.Unlock()
-
-	if c.conn != nil {
-		log.Println("[AUTH] ForceReconnect: Forcing TCP reconnection due to network change...")
-		c.conn.Close()
-		c.conn = nil
+	if c.conn == nil {
+		return false
 	}
+	log.Println("[AUTH] Closing auth TCP connection...")
+	c.conn.Close()
+	c.conn = nil
+	return true
 }
 
 // logStatus logs a message to stdout and also triggers the OnStatusMessage callback
@@ -909,4 +1263,109 @@ func (c *Client) logStatus(format string, args ...any) {
 	if c.OnStatusMessage != nil {
 		go c.OnStatusMessage("🔐 " + msg)
 	}
+}
+
+// SetVPNManager sets the VPN manager for this auth client
+// Call this BEFORE Start() if VPN is enabled
+func (c *Client) SetVPNManager(mgr *vpn.Manager) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.vpnManager = mgr
+}
+
+// SetVPNRouterIP sets the router IP reachable inside WireGuard tunnel for TCP auth/refresh.
+func (c *Client) SetVPNRouterIP(ip string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.vpnRouterIP = strings.TrimSpace(ip)
+}
+
+// WaitForVPN blocks until VPN tunnel is ready or timeout
+// Returns true if VPN is ready, false if timeout
+func (c *Client) WaitForVPN(timeout time.Duration) bool {
+	select {
+	case <-c.vpnReadyCh:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+// RequestVPNProvisioning sends 0xB0 to router and handles 0xB1 response
+func (c *Client) RequestVPNProvisioning() error {
+	c.mu.RLock()
+	sessionToken := c.sessionToken
+	conn := c.conn
+	mgr := c.vpnManager
+	c.mu.RUnlock()
+
+	if mgr == nil {
+		return fmt.Errorf("VPN manager not set")
+	}
+	if sessionToken == "" {
+		return fmt.Errorf("no session token available")
+	}
+	if conn == nil {
+		return fmt.Errorf("not connected to server")
+	}
+
+	priv, pub, isNew, err := mgr.LoadOrGenerateKeyPair()
+	if err != nil {
+		return fmt.Errorf("failed to load/generate VPN keypair: %w", err)
+	}
+
+	c.mu.Lock()
+	c.vpnPublicKey = pub
+	c.mu.Unlock()
+
+	log.Printf("[VPN] 📡 Requesting VPN provisioning from router...")
+	if isNew {
+		log.Printf("[VPN] Using newly generated keypair")
+	}
+
+	req := &VPNProvisionRequest{
+		DroneUUID:    c.droneUUID,
+		SessionToken: sessionToken,
+		WGPublicKey:  pub,
+	}
+
+	packet := SerializeVPNProvisionRequest(req)
+	c.tcpMu.Lock()
+	defer c.tcpMu.Unlock()
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	defer conn.SetDeadline(time.Time{})
+	_, err = conn.Write(packet)
+	if err != nil {
+		return fmt.Errorf("failed to send VPN provision request: %w", err)
+	}
+
+	buf := make([]byte, 4096)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return fmt.Errorf("failed to read VPN provision ack: %w", err)
+	}
+
+	log.Printf("[VPN_DEBUG] Received VPN Ack - Raw Packet Hex: %x", buf[:n])
+
+	ack, err := ParseVPNProvisionAck(buf[:n])
+	if err != nil {
+		return fmt.Errorf("failed to parse VPN provision ack: %w", err)
+	}
+
+	if ack.Result != ResultSuccess {
+		return fmt.Errorf("vpn provisioning failed, error code: %d", ack.ErrorCode)
+	}
+
+	log.Printf("[VPN] ✅ VPN provisioned! IP=%s, Server=%s", ack.AssignedIP, ack.ServerEndpoint)
+
+	err = mgr.SaveProvisionedConfig(priv, pub, ack.AssignedIP, ack.ServerPublicKey, ack.ServerEndpoint)
+	if err != nil {
+		return fmt.Errorf("failed to save VPN config: %w", err)
+	}
+
+	c.mu.Lock()
+	close(c.vpnReadyCh)
+	c.mu.Unlock()
+
+	return nil
 }

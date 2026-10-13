@@ -15,12 +15,14 @@ import (
 	"github.com/bluenviron/gomavlib/v3"
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
 
-	"UAVLink-Edge/auth"
-	"UAVLink-Edge/config"
-	"UAVLink-Edge/logger"
-	"UAVLink-Edge/mavlink_custom"
-	"UAVLink-Edge/metrics"
-	"UAVLink-Edge/web"
+	"DroneBridge/auth"
+	"DroneBridge/config"
+	"DroneBridge/logger"
+	"DroneBridge/mavlink_custom"
+	"DroneBridge/metrics"
+	"DroneBridge/network"
+	"DroneBridge/vpn"
+	"DroneBridge/web"
 )
 
 // getMessageTypeName extracts clean message type name from message
@@ -34,6 +36,13 @@ func createSenderEndpoint(targetAddr string) gomavlib.EndpointConf {
 
 func getMessageTypeName(msg interface{}) string {
 	fullType := fmt.Sprintf("%T", msg)
+
+	switch msg.(type) {
+	case *mavlink_custom.MessageDronebridgeStatus:
+		return "DronebridgeStatus"
+	case *mavlink_custom.MessageMavlinkKeepAlive:
+		return "MavlinkKeepAlive"
+	}
 
 	// Remove *common. prefix if exists
 	if strings.HasPrefix(fullType, "*common.Message") {
@@ -53,18 +62,95 @@ func getMessageTypeName(msg interface{}) string {
 	return fullType
 }
 
-// getPixhawkSystemID returns the actual Pixhawk system ID from the web bridge
-// This ensures we use the dynamic system ID detected from the Pixhawk heartbeat
-// instead of hardcoding it. Falls back to 1 if not yet connected.
-func getPixhawkSystemID() uint8 {
-	return web.GetPixhawkSystemID()
+const (
+	partnerHeartbeatSysID  = 255 // MAV_TYPE_GCS ground station
+	partnerHeartbeatCompID = 190
+	mavlinkMsgGpsRawInt    = 24 // GPS_RAW_INT — raw GPS; withhold when forward_gps_raw_int: false
+)
+
+var partnerHeartbeatOnce sync.Once
+
+// pixhawkMAVLinkAddr returns PX4 UDP target (e.g. 10.41.10.2:14550) for partner registration.
+func pixhawkMAVLinkAddr(cfg *config.Config) string {
+	if cfg == nil || cfg.Ethernet.PixhawkIP == "" {
+		return ""
+	}
+	port := cfg.Ethernet.PixhawkPort
+	if port <= 0 {
+		port = cfg.Network.LocalListenPort
+	}
+	return fmt.Sprintf("%s:%d", cfg.Ethernet.PixhawkIP, port)
+}
+
+func forwardGpsRawToServer(cfg *config.Config) bool {
+	if cfg == nil || cfg.Network.ForwardGpsRawInt == nil {
+		return true
+	}
+	return *cfg.Network.ForwardGpsRawInt
+}
+
+// StartPixhawkPartnerHeartbeat sends HEARTBEAT at 1 Hz to PX4 from fixed local port :14550
+// so ETH instance registers CM5 as partner (PX4 replies to source IP:port, not always :14550).
+// Uses raw UDP like PX4_Mavlink_Drone_Simulator — avoids gomavlib ephemeral EndpointUDPClient.
+func StartPixhawkPartnerHeartbeat(cfg *config.Config) {
+	partnerHeartbeatOnce.Do(func() {
+		addr := pixhawkMAVLinkAddr(cfg)
+		if pixhawkUDP == nil || addr == "" {
+			if cfg != nil && cfg.Ethernet.PixhawkIP == "" {
+				logger.Warn("[PARTNER_HB] ethernet.pixhawk_ip not set — partner heartbeat disabled")
+			}
+			return
+		}
+		logger.Info("[PARTNER_HB] Will send HEARTBEAT 1 Hz from :%d → %s (sysid=%d compid=%d)",
+			cfg.Network.LocalListenPort, addr, partnerHeartbeatSysID, partnerHeartbeatCompID)
+		go runPartnerHeartbeatRaw(pixhawkUDP, addr)
+	})
+}
+
+// mavlinkSeqKey identifies the MAVLink sequence counter scope (per system + component).
+type mavlinkSeqKey struct {
+	sysID  uint8
+	compID uint8
+}
+
+// seqHist remembers recent sequence numbers so a unicast copy and a broadcast
+// copy of the same frame, arriving a few messages apart, are not both forwarded.
+const seqHistLen = 32
+
+type seqHist struct {
+	buf [seqHistLen]uint8
+	n   int
+	pos int
+}
+
+func (h *seqHist) duplicate(seq uint8) bool {
+	n := h.n
+	if n > seqHistLen {
+		n = seqHistLen
+	}
+	for i := 0; i < n; i++ {
+		if h.buf[i] == seq {
+			return true
+		}
+	}
+	h.buf[h.pos] = seq
+	h.pos = (h.pos + 1) % seqHistLen
+	if h.n < seqHistLen {
+		h.n++
+	}
+	return false
 }
 
 // Forwarder handles receiving real MAVLink messages from Pixhawk and forwarding to server
 type Forwarder struct {
-	cfg          *config.Config
-	listenerNode *gomavlib.Node // Listens for messages from Pixhawk and sends heartbeats
-	senderNode   *gomavlib.Node // Sends messages to server
+	cfg                 *config.Config
+	listenerNode        *gomavlib.Node // Listens for messages from Pixhawk and sends heartbeats
+	senderNode          *gomavlib.Node // Sends messages to server
+	cameraSenderNode    *gomavlib.Node // CM5 camera sys=PX4 comp=100
+	companionSenderNode *gomavlib.Node // CM5 onboard sys=245 comp=191
+	cameraSenderMu      sync.RWMutex
+	companionSenderMu   sync.RWMutex
+	gpsPx4              px4GpsCache
 
 	bytesReceived uint64
 	bytesSent     uint64
@@ -72,10 +158,10 @@ type Forwarder struct {
 
 	// Message counters for diagnosing in/out mismatch by MAVLink message ID.
 	msgStatsMu    sync.Mutex
-	msgInByID     map[uint32]uint64 // Pixhawk -> UAVLink-Edge (after SysID filtering)
-	msgOutByID    map[uint32]uint64 // UAVLink-Edge -> Server (successful writes)
-	msgSrvInByID  map[uint32]uint64 // Server -> UAVLink-Edge
-	msgSrvOutByID map[uint32]uint64 // UAVLink-Edge -> Pixhawk (successful writes)
+	msgInByID     map[uint32]uint64 // Pixhawk -> DroneBridge (after SysID filtering)
+	msgOutByID    map[uint32]uint64 // DroneBridge -> Server (successful writes)
+	msgSrvInByID  map[uint32]uint64 // Server -> DroneBridge
+	msgSrvOutByID map[uint32]uint64 // DroneBridge -> Pixhawk (successful writes)
 
 	// Packet counters for debugging loss between UDP :14540 input and server uplink.
 	pktStatsMu sync.Mutex
@@ -87,6 +173,7 @@ type Forwarder struct {
 	dropSysID255Total       uint64
 	dropDuplicateTotal      uint64
 	dropNoPixhawkTotal      uint64
+	dropVPNNotReadyTotal    uint64
 	dropUnhealthyTotal      uint64
 	dropSendErrorTotal      uint64
 	// Per-second counters (reset every report tick).
@@ -97,16 +184,21 @@ type Forwarder struct {
 	dropSysID255Sec       uint64
 	dropDuplicateSec      uint64
 	dropNoPixhawkSec      uint64
+	dropVPNNotReadySec    uint64
 	dropUnhealthySec      uint64
 	dropSendErrorSec      uint64
 
 	authClient *auth.Client
 	stopCh     chan struct{}
-	previousIP string // Track previous local IP for change detection
+	previousIP string // VPN assigned IP (health)
+
+	// Physical egress (PBR) — netmon quyết định; app chỉ phản ứng (§7.4)
+	previousPhysicalEgress string
 
 	// Pixhawk connection tracking
-	pixhawkConnected chan struct{} // Signal when first heartbeat from Pixhawk received
-	pixhawkOnce      sync.Once     // Ensure pixhawkConnected is closed only once
+	pixhawkConnected  chan struct{} // Signal when first heartbeat from Pixhawk received
+	pixhawkOnce       sync.Once     // Ensure pixhawkConnected is closed only once
+	streamRequestOnce sync.Once     // Request GPS streams once from PX4
 
 	// Network health
 	isHealthy    bool
@@ -121,8 +213,8 @@ type Forwarder struct {
 	// UDP heartbeat status
 	udpHeartbeatSent chan struct{} // Signal when first UDP heartbeat sent
 
-	// Deduplication - track seen messages by sequence number
-	lastSeqNum map[uint8]uint8 // SystemID -> last sequence number
+	// Deduplication - last sequence per (system ID, component ID) pair
+	lastSeqNum map[mavlinkSeqKey]*seqHist
 	seqMu      sync.RWMutex
 
 	// Verbose mode for detailed message parsing
@@ -130,6 +222,9 @@ type Forwarder struct {
 
 	// Synchronization manager for multi-drone coordination
 	syncManager *SyncManager
+
+	// VPN
+	vpnManager *vpn.Manager
 
 	// senderNode lifecycle management
 	senderMu        sync.RWMutex  // Protects f.senderNode pointer access
@@ -237,6 +332,7 @@ type pktStatsSnapshot struct {
 	dropSysID255       uint64
 	dropDuplicate      uint64
 	dropNoPixhawk      uint64
+	dropVPNNotReady    uint64
 	dropUnhealthy      uint64
 	dropSendError      uint64
 }
@@ -249,10 +345,13 @@ type pktTotalsSnapshot struct {
 	dropSysID255       uint64
 	dropDuplicate      uint64
 	dropNoPixhawk      uint64
+	dropVPNNotReady    uint64
 	dropUnhealthy      uint64
 	dropSendError      uint64
 }
 
+// incPktRawIn14540 counts every MAVLink frame received on local :14550,
+// before SysID filtering (PX4, QGC SysID 255, simulator, etc.).
 func (f *Forwarder) incPktRawIn14540() {
 	f.pktStatsMu.Lock()
 	f.rawIn14540Total++
@@ -302,6 +401,13 @@ func (f *Forwarder) incPktDropNoPixhawk() {
 	f.pktStatsMu.Unlock()
 }
 
+func (f *Forwarder) incPktDropVPNNotReady() {
+	f.pktStatsMu.Lock()
+	f.dropVPNNotReadyTotal++
+	f.dropVPNNotReadySec++
+	f.pktStatsMu.Unlock()
+}
+
 func (f *Forwarder) incPktDropUnhealthy() {
 	f.pktStatsMu.Lock()
 	f.dropUnhealthyTotal++
@@ -328,6 +434,7 @@ func (f *Forwarder) takePktStatsSnapshot() (pktStatsSnapshot, pktTotalsSnapshot)
 		dropSysID255:       f.dropSysID255Sec,
 		dropDuplicate:      f.dropDuplicateSec,
 		dropNoPixhawk:      f.dropNoPixhawkSec,
+		dropVPNNotReady:    f.dropVPNNotReadySec,
 		dropUnhealthy:      f.dropUnhealthySec,
 		dropSendError:      f.dropSendErrorSec,
 	}
@@ -340,6 +447,7 @@ func (f *Forwarder) takePktStatsSnapshot() (pktStatsSnapshot, pktTotalsSnapshot)
 		dropSysID255:       f.dropSysID255Total,
 		dropDuplicate:      f.dropDuplicateTotal,
 		dropNoPixhawk:      f.dropNoPixhawkTotal,
+		dropVPNNotReady:    f.dropVPNNotReadyTotal,
 		dropUnhealthy:      f.dropUnhealthyTotal,
 		dropSendError:      f.dropSendErrorTotal,
 	}
@@ -351,6 +459,7 @@ func (f *Forwarder) takePktStatsSnapshot() (pktStatsSnapshot, pktTotalsSnapshot)
 	f.dropSysID255Sec = 0
 	f.dropDuplicateSec = 0
 	f.dropNoPixhawkSec = 0
+	f.dropVPNNotReadySec = 0
 	f.dropUnhealthySec = 0
 	f.dropSendErrorSec = 0
 
@@ -511,47 +620,65 @@ func setupInterfaceIP(ifaceName, ipAddr, subnet string) error {
 	return nil
 }
 
-// New creates a new forwarder instance
-// NewListener creates only the listener node to receive from Pixhawk
-// This is called BEFORE connecting to Pixhawk to capture its System ID
+// NewListener creates the MAVLink listener for Pixhawk (fixed UDP :14550, no ephemeral client).
 func NewListener(cfg *config.Config) (*gomavlib.Node, error) {
-	// Get ethernet IP for UDP broadcast
-	_, broadcastEthIP, ifaceName, ethErr := getEthernetIP(cfg)
-
-	// Build endpoints list
-	endpoints := []gomavlib.EndpointConf{
-		gomavlib.EndpointUDPServer{Address: fmt.Sprintf("0.0.0.0:%d", cfg.Network.LocalListenPort)},
+	endpoints, err := buildListenerEndpoints(cfg)
+	if err != nil {
+		return nil, err
 	}
 
-	enableBroadcast := ethErr == nil && broadcastEthIP != ""
-	if enableBroadcast {
-		endpoints = append(endpoints, gomavlib.EndpointUDPBroadcast{
-			BroadcastAddress: fmt.Sprintf("%s:%d", broadcastEthIP, cfg.Network.LocalListenPort),
-		})
-		logger.Info("[NETWORK] UDP Broadcast enabled on %s: Broadcast=%s:%d",
-			ifaceName, broadcastEthIP, cfg.Network.LocalListenPort)
-	} else {
-		if ethErr != nil {
-			logger.Warn("[NETWORK] UDP Broadcast disabled: %v", ethErr)
-		} else {
-			logger.Info("[NETWORK] UDP Broadcast disabled by configuration")
-		}
-		logger.Info("[NETWORK] Running with UDP Server only on 0.0.0.0:%d", cfg.Network.LocalListenPort)
-	}
-
-	// Create listener node to receive from Pixhawk
 	listenerNode, err := gomavlib.NewNode(gomavlib.NodeConf{
 		Endpoints:        endpoints,
 		Dialect:          mavlink_custom.GetCombinedDialect(),
 		OutVersion:       gomavlib.V2,
-		OutSystemID:      255, // Ground station ID
+		OutSystemID:      partnerHeartbeatSysID, // gomavlib requires >= 1; partner HB uses raw UDP, not this node
+		OutComponentID:   partnerHeartbeatCompID,
 		HeartbeatDisable: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create listener MAVLink node: %w", err)
 	}
+	installPX4CommandWriter(listenerNode)
 	logger.Info("[LISTENER] MAVLink listener created on port %d", cfg.Network.LocalListenPort)
 	return listenerNode, nil
+}
+
+// WaitForListenerHeartbeat blocks until a real Pixhawk HEARTBEAT arrives or timeout.
+func WaitForListenerHeartbeat(node *gomavlib.Node, timeout time.Duration) (sysID uint8, ok bool) {
+	if node == nil {
+		return 0, false
+	}
+
+	eventCh := node.Events()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-timer.C:
+			return 0, false
+		case event := <-eventCh:
+			frame, isFrame := event.(*gomavlib.EventFrame)
+			if !isFrame {
+				continue
+			}
+			sid := frame.SystemID()
+			if sid == 255 {
+				logger.Debug("[REJECT] Ignoring simulator/GCS heartbeat (SysID: 255)")
+				continue
+			}
+			logger.Info("[PIXHAWK_CONNECTED] ✅ First heartbeat received from Pixhawk (SysID: %d)", sid)
+			web.HandleHeartbeat(sid)
+			return sid, true
+		}
+	}
+}
+
+func resolveOutSystemID() uint8 {
+	if sysID := web.GetPixhawkSystemID(); sysID != 0 {
+		return sysID
+	}
+	return 1
 }
 
 // New creates a new forwarder instance with BOTH listener and sender nodes
@@ -576,38 +703,18 @@ func New(cfg *config.Config, authClient *auth.Client, listenerNode *gomavlib.Nod
 		logger.Warn("Authentication disabled - running in insecure mode")
 	}
 
+	// Reuse listener node if provided, otherwise create one (same fixed-port path as startup).
 	var err error
 	if listenerNode == nil {
-		// Build endpoints list
-		endpoints := []gomavlib.EndpointConf{
-			gomavlib.EndpointUDPServer{Address: fmt.Sprintf("0.0.0.0:%d", cfg.Network.LocalListenPort)},
-		}
-
-		// UDP broadcast disabled for now (or could be enabled based on ethErr)
-		logger.Info("[NETWORK] Running with UDP Server only on 0.0.0.0:%d", cfg.Network.LocalListenPort)
-
-		// Create listener node to receive from Pixhawk
-		listenerNode, err = gomavlib.NewNode(gomavlib.NodeConf{
-			Endpoints:        endpoints,
-			Dialect:          mavlink_custom.GetCombinedDialect(),
-			OutVersion:       gomavlib.V2,
-			OutSystemID:      255, // Ground station ID
-			HeartbeatDisable: true,
-		})
+		listenerNode, err = NewListener(cfg)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create listener MAVLink node: %w", err)
+			return nil, err
 		}
-		logger.Info("MAVLink listener created on port %d", cfg.Network.LocalListenPort)
 	} else {
 		logger.Info("[FORWARDER] Reusing existing listener node")
 	}
 
-	// Get actual Pixhawk System ID from web bridge (was captured from heartbeat)
-	pixhawkSysID := web.GetPixhawkSystemID()
-	// Use default System ID if Pixhawk not available (e.g., when allow_missing_pixhawk=true)
-	if pixhawkSysID == 0 {
-		pixhawkSysID = 1 // Default valid System ID for missing Pixhawk
-	}
+	pixhawkSysID := resolveOutSystemID()
 	logger.Info("[FORWARDER] Using Pixhawk System ID: %d for OutSystemID", pixhawkSysID)
 
 	// Create sender node to forward to server WITH correct system ID
@@ -643,26 +750,93 @@ func New(cfg *config.Config, authClient *auth.Client, listenerNode *gomavlib.Nod
 		isHealthy:        true,
 		forceCheckCh:     make(chan struct{}, 1),
 		udpHeartbeatSent: make(chan struct{}, 1),
-		lastSeqNum:       make(map[uint8]uint8),
+		lastSeqNum:       make(map[mavlinkSeqKey]*seqHist),
 		verboseMode:      cfg.Log.Verbose,
 		syncManager:      nil, // Set via SetSyncManager() if needed
 		senderRebuildCh:  make(chan struct{}, 1),
 	}
 
-	// Wire up network error callback
-	if authClient != nil {
-		authClient.OnNetworkError = func() {
-			fwd.mu.Lock()
-			if fwd.isHealthy {
-				logger.Warn("[NETWORK] Network error detected via Auth Client - Marking unhealthy")
-				fwd.isHealthy = false
-				// Trigger immediate IP check
-				select {
-				case fwd.forceCheckCh <- struct{}{}:
-				default:
+	if err := fwd.initCameraSender(fwd.getEndpointConf()); err != nil {
+		listenerNode.Close()
+		senderNode.Close()
+		return nil, fmt.Errorf("failed to create camera MAVLink sender: %w", err)
+	}
+	if err := fwd.initCompanionSender(fwd.getEndpointConf()); err != nil {
+		listenerNode.Close()
+		senderNode.Close()
+		return nil, fmt.Errorf("failed to create companion MAVLink sender: %w", err)
+	}
+
+	return fwd, nil
+}
+
+// NewWithVPN creates a forwarder with an optional VPN manager
+func NewWithVPN(cfg *config.Config, authClient *auth.Client, listenerNode *gomavlib.Node, vpnMgr *vpn.Manager) (*Forwarder, error) {
+	fwd, err := New(cfg, authClient, listenerNode)
+	if err != nil {
+		return nil, err
+	}
+	fwd.vpnManager = vpnMgr
+
+	// Bind to VPN only when the tunnel is actually running.
+	// Assigned IP can exist in config from previous runs, but interface may not be up yet.
+	if vpnMgr != nil {
+		if vpnMgr.IsRunning() {
+			assigned := vpnMgr.GetAssignedIP()
+			if assigned == "" {
+				logger.Info("[FORWARDER] VPN running but no assigned IP yet - keeping current sender")
+				return fwd, nil
+			}
+			logger.Info("[FORWARDER] VPN assigned IP detected: %s - binding sender to VPN", assigned)
+
+			// Close existing sender node before recreating
+			if fwd.senderNode != nil {
+				fwd.senderNode.Close()
+			}
+
+			// Determine OutSystemID again (use Pixhawk ID or default)
+			pixhawkSysID := resolveOutSystemID()
+
+			// Dial via VPN manager which will bind to the assigned WireGuard IP
+			conn, err := vpnMgr.DialUDP(cfg.GetAddress())
+			if err != nil {
+				logger.Warn("[FORWARDER] failed to DialUDP via VPN manager: %v - falling back to prior sender", err)
+			} else {
+				logged := &loggedConn{conn: conn, f: fwd}
+				senderNode, err := gomavlib.NewNode(gomavlib.NodeConf{
+					Endpoints: []gomavlib.EndpointConf{
+						gomavlib.EndpointCustom{ReadWriteCloser: logged},
+					},
+					Dialect:          mavlink_custom.GetCombinedDialect(),
+					OutVersion:       gomavlib.V2,
+					OutSystemID:      pixhawkSysID,
+					HeartbeatDisable: true,
+				})
+				if err != nil {
+					logger.Warn("[FORWARDER] failed to create sender node bound to VPN: %v - falling back", err)
+					// try to close conn if Node creation failed
+					conn.Close()
+				} else {
+					fwd.senderMu.Lock()
+					fwd.senderNode = senderNode
+					fwd.senderMu.Unlock()
+					logger.Info("[FORWARDER] Sender recreated and bound to VPN IP %s", assigned)
+					camConn, camErr := vpnMgr.DialUDP(cfg.GetAddress())
+					if camErr != nil {
+						logger.Warn("[FORWARDER] Camera MAVLink VPN dial failed: %v", camErr)
+					} else if err := fwd.initCameraSender(gomavlib.EndpointCustom{ReadWriteCloser: &loggedConn{conn: camConn, f: fwd}}); err != nil {
+						logger.Warn("[FORWARDER] Camera sender on VPN failed: %v", err)
+					}
+					compConn, compErr := vpnMgr.DialUDP(cfg.GetAddress())
+					if compErr != nil {
+						logger.Warn("[FORWARDER] Companion MAVLink VPN dial failed: %v", compErr)
+					} else if err := fwd.initCompanionSender(gomavlib.EndpointCustom{ReadWriteCloser: &loggedConn{conn: compConn, f: fwd}}); err != nil {
+						logger.Warn("[FORWARDER] Companion sender on VPN failed: %v", err)
+					}
 				}
 			}
-			fwd.mu.Unlock()
+		} else {
+			logger.Info("[FORWARDER] VPN manager provided but tunnel is not running yet - will bind when available")
 		}
 	}
 
@@ -690,20 +864,49 @@ func (f *Forwarder) SetAuthClient(authClient *auth.Client) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.authClient = authClient
-	if f.authClient != nil {
-		// Wire up network error callback
-		f.authClient.OnNetworkError = func() {
-			f.mu.Lock()
-			if f.isHealthy {
-				logger.Warn("[NETWORK] Network error detected via Auth Client - Marking unhealthy")
-				f.isHealthy = false
-				// Trigger immediate IP check
-				select {
-				case f.forceCheckCh <- struct{}{}:
-				default:
-				}
+	if f.authClient == nil {
+		return
+	}
+
+	f.authClient.OnNetworkError = func() {
+		f.mu.Lock()
+		if f.isHealthy {
+			logger.Warn("[NETWORK] Network error detected via Auth Client - Marking unhealthy")
+			f.isHealthy = false
+			select {
+			case f.forceCheckCh <- struct{}{}:
+			default:
 			}
+		}
+		f.mu.Unlock()
+	}
+
+	f.authClient.OnDisconnectCause = func(cause auth.DisconnectCause) {
+		logger.Warn("[NETWORK] Server disconnect cause: %s", cause)
+		switch cause {
+		case auth.DisconnectNetwork:
+			// OnNetworkError already triggers IP monitor.
+		case auth.DisconnectSessionInvalid, auth.DisconnectAuthFailed:
+			f.mu.Lock()
+			f.isHealthy = false
 			f.mu.Unlock()
+			// Auth client recovers via handleRefreshFailure; no ForceReconnect here.
+		case auth.DisconnectServerTransient:
+			// Retry on next refresh tick; no full rebuild.
+		}
+	}
+
+	f.authClient.OnSessionRestored = func() {
+		f.mu.Lock()
+		wasUnhealthy := !f.isHealthy
+		f.isHealthy = true
+		f.mu.Unlock()
+		if wasUnhealthy {
+			logger.Info("[NETWORK] Session restored — resuming MAVLink uplink from Pixhawk")
+			select {
+			case f.forceCheckCh <- struct{}{}:
+			default:
+			}
 		}
 	}
 }
@@ -721,6 +924,9 @@ func (f *Forwarder) SetSyncManager(syncManager *SyncManager) {
 // Start begins the forwarder
 func (f *Forwarder) Start() error {
 	logger.Info("Starting MAVLink forwarder...")
+	if !forwardGpsRawToServer(f.cfg) {
+		logger.Info("[MAVLINK] GPS_RAW_INT uplink OFF — server nhận GLOBAL_POSITION_INT / LOCAL_POSITION_NED (EKF)")
+	}
 
 	// NOTE: Auth client is already started in main.go before calling fwd.Start()
 	// Do NOT call authClient.Start() here to avoid duplicate TCP connections
@@ -732,6 +938,7 @@ func (f *Forwarder) Start() error {
 	// Start receiving and forwarding messages
 	go f.receiveAndForward()
 	go f.receiveFromServer()
+	startPX4LinkSupervisor(f.listenerNode, f.cfg, f.stopCh)
 
 	if f.cfg != nil && f.cfg.Auth.SessionHeartbeatFrequency > 0 {
 		go f.sendMavlinkKeepAlive() // Start this BEFORE waiting for udpHeartbeatSent
@@ -751,6 +958,7 @@ func (f *Forwarder) Start() error {
 	}
 
 	go f.reportBandwidth()
+	f.startCompanionStatusBridge()
 
 	logger.Info("Forwarder started - listening on port %d, forwarding to %s",
 		f.cfg.Network.LocalListenPort, f.cfg.GetAddress())
@@ -778,6 +986,7 @@ func (f *Forwarder) receiveAndForward() {
 	eventCh := f.listenerNode.Events()
 	messageCount := 0
 	forwardedCount := 0
+	var linkGen uint64
 
 	// Wait for sync signal if enabled (for multi-drone synchronization)
 	if f.syncManager != nil && f.syncManager.IsEnabled() {
@@ -799,6 +1008,17 @@ func (f *Forwarder) receiveAndForward() {
 			case *gomavlib.EventFrame:
 				// Received a MAVLink message from Pixhawk
 				msg := e.Message()
+				nowFrame := time.Now()
+				forward, gen := px4Links.observe(e.Channel, msg, e.SystemID(), e.ComponentID(), nowFrame)
+				if gen != linkGen {
+					linkGen = gen
+					f.seqMu.Lock()
+					f.lastSeqNum = make(map[mavlinkSeqKey]*seqHist)
+					f.seqMu.Unlock()
+				}
+				if !forward {
+					continue
+				}
 				f.incPktRawIn14540()
 				msgID := msg.GetID()
 				msgTypeName := getMessageTypeName(msg)
@@ -817,24 +1037,28 @@ func (f *Forwarder) receiveAndForward() {
 				messageCount++
 				f.incMsgIn(msgID)
 
-				// Deduplicate messages by checking sequence number
+				// Same PX4 frame can arrive twice while Ethernet still broadcasts and unicasts.
+				compID := e.ComponentID()
+				seqKey := mavlinkSeqKey{sysID: sysID, compID: compID}
 				f.seqMu.Lock()
-				lastSeq, exists := f.lastSeqNum[sysID]
-				if exists && lastSeq == seqNum {
-					// Duplicate message, skip
+				hist := f.lastSeqNum[seqKey]
+				if hist == nil {
+					hist = &seqHist{}
+					f.lastSeqNum[seqKey] = hist
+				}
+				if hist.duplicate(seqNum) {
 					f.seqMu.Unlock()
 					f.incPktDropDuplicate()
-					logger.Debug("[DUP] Skipping duplicate %s (SysID: %d, Seq: %d)", msgTypeName, sysID, seqNum)
+					logger.Debug("[DUP] Skipping duplicate %s (SysID: %d, CompID: %d, Seq: %d)", msgTypeName, sysID, compID, seqNum)
 					continue
 				}
-				f.lastSeqNum[sysID] = seqNum
 				f.seqMu.Unlock()
 				f.incPktAcceptedIn14540()
 
 				forwardedCount++
 
 				// Debug: Log all received messages
-				logger.Debug("[RX] %s (SysID: %d, Seq: %d)", msgTypeName, sysID, seqNum)
+				logger.Debug("[RX] %s (SysID: %d, CompID: %d, Seq: %d)", msgTypeName, sysID, compID, seqNum)
 
 				if forwardedCount%10000 == 0 {
 					logger.Info("[STATS] Forwarded %d messages (received %d, dedup rate: %.1f%%)",
@@ -850,6 +1074,9 @@ func (f *Forwarder) receiveAndForward() {
 							close(f.pixhawkConnected)
 							logger.Info("[PIXHAWK_CONNECTED] ✅ First heartbeat received from Pixhawk (SysID: %d)", sysID)
 						})
+						f.streamRequestOnce.Do(func() {
+							go f.requestPixhawkTelemetryStreams()
+						})
 					}
 
 					// Only log and notify web UI for REAL Pixhawk (not SysID 255)
@@ -860,20 +1087,40 @@ func (f *Forwarder) receiveAndForward() {
 						}
 						// Notify web server of connected Pixhawk - this captures the actual system ID
 						web.HandleHeartbeat(sysID)
+						web.HandleTelemetryHeartbeat(m)
 						actualSysID := web.GetPixhawkSystemID()
 						logger.Debug("[SYSID] Detected Pixhawk System ID: %d (using for MAVLink operations)", actualSysID)
 					}
 				case *common.MessageGpsRawInt:
+					if sysID != 255 {
+						f.gpsPx4.noteGpsRaw(m)
+						web.HandleTelemetryGpsRaw(m)
+					}
 					if now.Sub(f.lastGPSLog) > 30*time.Second {
 						logger.Info("[PIXHAWK] GPS: Fix=%d, Lat=%.6f, Lon=%.6f, Sats=%d",
 							m.FixType, float64(m.Lat)/1e7, float64(m.Lon)/1e7, m.SatellitesVisible)
 						f.lastGPSLog = now
 					}
 				case *common.MessageSysStatus:
+					if sysID != 255 {
+						web.HandleTelemetrySysStatus(m)
+					}
 					if now.Sub(f.lastAttitudeLog) > 30*time.Second {
 						logger.Info("[PIXHAWK] Status: Voltage=%.2fV, Battery=%d%%",
 							float64(m.VoltageBattery)/1000, m.BatteryRemaining)
 						f.lastAttitudeLog = now
+					}
+				case *common.MessageVfrHud:
+					if sysID != 255 {
+						web.HandleTelemetryVfrHud(m)
+					}
+				case *common.MessageGlobalPositionInt:
+					if sysID != 255 {
+						web.HandleTelemetryGlobalPosition(m)
+					}
+				case *common.MessageLocalPositionNed:
+					if sysID != 255 {
+						f.gpsPx4.noteLocalPosition()
 					}
 				case *common.MessageParamValue:
 					// Forward to web server for parameter caching
@@ -903,10 +1150,20 @@ func (f *Forwarder) receiveAndForward() {
 					continue
 				}
 
-				// No VPN mode, forward directly
+				// In VPN mode, MAVLink packets must only flow through the WireGuard tunnel.
+				if f.cfg != nil && f.cfg.VPN.Enabled {
+					if f.vpnManager == nil || !f.vpnManager.IsRunning() || f.vpnManager.GetAssignedIP() == "" {
+						f.incPktDropVPNNotReady()
+						logger.Debug("[SKIP] VPN tunnel not ready - not forwarding %s", msgTypeName)
+						continue
+					}
+				}
+
 				if !healthy {
 					metrics.Global.IncFailedUnhealthy(msgTypeName)
 					f.incPktDropUnhealthy()
+				} else if msgID == mavlinkMsgGpsRawInt && !forwardGpsRawToServer(f.cfg) {
+					logger.Debug("[SKIP] GPS_RAW_INT withheld from server (EKF-only uplink)")
 				} else {
 					// Forward the raw frame directly to preserve original message
 					f.senderMu.RLock()
@@ -925,8 +1182,10 @@ func (f *Forwarder) receiveAndForward() {
 				}
 
 			case *gomavlib.EventChannelOpen:
+				px4Links.register(e.Channel)
 				logger.Info("[LISTENER] Channel opened: %v", e.Channel)
 			case *gomavlib.EventChannelClose:
+				px4Links.unregister(e.Channel)
 				logger.Warn("[LISTENER] Channel closed: %v", e.Channel)
 			case *gomavlib.EventParseError:
 				logger.Debug("[LISTENER] Parse error: %v", e.Error)
@@ -1074,8 +1333,8 @@ func (f *Forwarder) receiveFromServer() {
 
 				logger.Debug("[SERVER->PIXHAWK] %s (SysID: %d)", msgTypeName, sysID)
 
-				// Forward message to Pixhawk
-				if err := f.listenerNode.WriteMessageAll(msg); err != nil {
+				// Forward the command on the one selected PX4 link.
+				if err := writeToActivePX4(f.listenerNode, msg); err != nil {
 					logger.Error("[SERVER->PIXHAWK] Failed to forward %s: %v", msgTypeName, err)
 				} else {
 					logger.Debug("[SERVER->PIXHAWK] Forwarded %s", msgTypeName)
@@ -1085,33 +1344,13 @@ func (f *Forwarder) receiveFromServer() {
 			case *gomavlib.EventChannelOpen:
 				logger.Info("[SENDER] Channel opened: %v", e.Channel)
 			case *gomavlib.EventChannelClose:
-				logger.Warn("[SENDER] Channel closed: %v", e.Channel)
+				if f.cfg != nil && f.cfg.VPN.Enabled {
+					logger.Info("[SENDER] Channel closed during sender rebind: %v", e.Channel)
+				} else {
+					logger.Warn("[SENDER] Channel closed: %v", e.Channel)
+				}
 			case *gomavlib.EventParseError:
 				logger.Debug("[SENDER] Parse error: %v", e.Error)
-			}
-		}
-	}
-}
-func (f *Forwarder) sendHeartbeat() {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-f.stopCh:
-			return
-		case <-ticker.C:
-			msg := &common.MessageHeartbeat{
-				Type:         6, // MAV_TYPE_GCS
-				Autopilot:    0, // MAV_AUTOPILOT_INVALID
-				BaseMode:     0, // MAV_MODE_FLAG enum
-				CustomMode:   0,
-				SystemStatus: 4, // MAV_STATE_ACTIVE
-			}
-			if err := f.listenerNode.WriteMessageAll(msg); err != nil {
-				logger.Error("[HEARTBEAT] Failed to send GCS heartbeat: %v", err)
-			} else {
-				logger.Debug("[HEARTBEAT] Sent GCS heartbeat")
 			}
 		}
 	}
@@ -1138,15 +1377,15 @@ func (f *Forwarder) sendMavlinkKeepAlive() {
 	// Modes:
 	//   shifted (default): token is shifted by 1 byte; last byte moved into PixhawkConnected
 	//   normal: send raw token directly in Token[32]
-	hbMode := strings.ToLower(strings.TrimSpace(os.Getenv("UAVLINK_EDGE_SESSION_HB_MODE")))
+	hbMode := strings.ToLower(strings.TrimSpace(os.Getenv("DRONEBRIDGE_SESSION_HB_MODE")))
 	if hbMode == "" {
 		hbMode = "shifted"
 	}
 	if hbMode != "normal" && hbMode != "shifted" {
-		logger.Warn("[UAVLINK_EDGE_SESSION_HB] Invalid UAVLINK_EDGE_SESSION_HB_MODE=%s, fallback to shifted", hbMode)
+		logger.Warn("[MAVLINK_KA] Invalid DRONEBRIDGE_SESSION_HB_MODE=%s, fallback to shifted", hbMode)
 		hbMode = "shifted"
 	}
-	logger.Info("[UAVLINK_EDGE_SESSION_HB] SESSION_HB mode: %s", hbMode)
+	logger.Info("[MAVLINK_KA] SESSION_HB mode: %s", hbMode)
 
 	firstSent := false
 	sequence := uint16(0)
@@ -1229,18 +1468,124 @@ func (f *Forwarder) sendMavlinkKeepAlive() {
 		}
 	}
 }
+
 func (f *Forwarder) getCurrentIP() string {
-	// Use the current outbound local IP so health can recover.
+	// Prefer strict assigned VPN IP when VPN is enabled and running.
+	if f.cfg != nil && f.cfg.VPN.Enabled && f.vpnManager != nil {
+		if !f.vpnManager.IsRunning() {
+			return ""
+		}
+		ip := f.vpnManager.GetAssignedIP()
+		if ip != "" {
+			if idx := strings.Index(ip, "/"); idx != -1 {
+				return ip[:idx]
+			}
+			return ip
+		}
+		return ""
+	}
+
+	// Non-VPN mode: use the current outbound local IP so health can recover.
 	ip, err := getLocalIP()
 	if err != nil {
-		logger.Debug("[IP_MONITOR] Failed to get local IP: %v", err)
+		logger.Debug("[IP_MONITOR] Failed to get local IP in non-VPN mode: %v", err)
 		return ""
 	}
 	return ip
 }
+
+func (f *Forwarder) checkPhysicalEgressChange(rebuildSender func(string)) {
+	iface, ip, ok := network.PhysicalEgress()
+	if !ok || iface == "" {
+		return
+	}
+	key := iface + "|" + ip
+	if f.previousPhysicalEgress == "" {
+		f.previousPhysicalEgress = key
+		if f.authClient != nil && ip != "" {
+			_, localIP, _ := f.authClient.GetSessionInfo()
+			if localIP != "" && localIP != ip {
+				logger.Info("[IP_MONITOR] Auth TCP on %s but PBR egress is %s (%s) — ForceReconnect",
+					localIP, ip, iface)
+				f.authClient.ForceReconnect()
+			}
+		}
+		return
+	}
+	if key == f.previousPhysicalEgress {
+		return
+	}
+	old := f.previousPhysicalEgress
+	f.previousPhysicalEgress = key
+	logger.Info("[IP_MONITOR] Physical egress changed: %s → %s", old, key)
+	metrics.Global.AddLog("WARN", fmt.Sprintf("Physical egress: %s → %s", old, key))
+	rebuildSender("physical-egress-changed")
+}
+
+// RebindUplink rebuilds the MAVLink sender after VPN becomes ready (post-auth startup).
+func (f *Forwarder) RebindUplink(reason string) {
+	if f.cfg == nil || !f.cfg.VPN.Enabled {
+		return
+	}
+	if f.vpnManager == nil || !f.vpnManager.IsRunning() || f.vpnManager.GetAssignedIP() == "" {
+		logger.Warn("[FORWARDER] RebindUplink(%s) skipped: VPN not ready", reason)
+		return
+	}
+
+	f.senderMu.RLock()
+	oldNode := f.senderNode
+	f.senderMu.RUnlock()
+	if oldNode != nil {
+		oldNode.Close()
+	}
+
+	pixhawkSysID := resolveOutSystemID()
+	node, err := gomavlib.NewNode(gomavlib.NodeConf{
+		Endpoints: []gomavlib.EndpointConf{
+			f.getEndpointConf(),
+		},
+		Dialect:          mavlink_custom.GetCombinedDialect(),
+		OutVersion:       gomavlib.V2,
+		OutSystemID:      pixhawkSysID,
+		HeartbeatDisable: true,
+	})
+	if err != nil {
+		logger.Error("[FORWARDER] RebindUplink(%s) failed: %v", reason, err)
+		return
+	}
+
+	f.senderMu.Lock()
+	f.senderNode = node
+	f.senderMu.Unlock()
+
+	if err := f.initCameraSender(f.getEndpointConf()); err != nil {
+		logger.Warn("[FORWARDER] Camera sender rebind failed (%s): %v", reason, err)
+	}
+	if err := f.initCompanionSender(f.getEndpointConf()); err != nil {
+		logger.Warn("[FORWARDER] Companion sender rebind failed (%s): %v", reason, err)
+	}
+
+	select {
+	case f.senderRebuildCh <- struct{}{}:
+	default:
+	}
+
+	logger.Info("[FORWARDER] Uplink rebound via VPN (%s)", reason)
+}
+
 func (f *Forwarder) getEndpointConf() gomavlib.EndpointConf {
 	if f.cfg == nil {
 		return gomavlib.EndpointUDPClient{Address: "127.0.0.1:14550"}
+	}
+
+	if f.vpnManager != nil && f.vpnManager.IsRunning() && f.vpnManager.GetAssignedIP() != "" {
+		conn, err := f.vpnManager.DialUDP(f.cfg.GetAddress())
+		if err == nil {
+			logger.Info("[FORWARDER] Binding sender endpoint via VPN context (IP: %s)", f.vpnManager.GetAssignedIP())
+			logged := &loggedConn{conn: conn, f: f}
+			return gomavlib.EndpointCustom{ReadWriteCloser: logged}
+		}
+		logger.Warn("[FORWARDER] Failed to DialUDP via VPN manager: %v - falling back", err)
 	}
 	return createSenderEndpoint(f.cfg.GetAddress())
 }
@@ -1261,10 +1606,7 @@ func (f *Forwarder) monitorIPChange() {
 		f.senderMu.RUnlock()
 		oldNode.Close()
 
-		pixhawkSysID := web.GetPixhawkSystemID()
-		if pixhawkSysID == 0 {
-			pixhawkSysID = 1
-		}
+		pixhawkSysID := resolveOutSystemID()
 		node, err := gomavlib.NewNode(gomavlib.NodeConf{
 			Endpoints: []gomavlib.EndpointConf{
 				f.getEndpointConf(),
@@ -1283,6 +1625,13 @@ func (f *Forwarder) monitorIPChange() {
 		f.senderNode = node
 		f.senderMu.Unlock()
 
+		if err := f.initCameraSender(f.getEndpointConf()); err != nil {
+			logger.Warn("[IP_MONITOR] Camera sender rebuild failed (%s): %v", reason, err)
+		}
+		if err := f.initCompanionSender(f.getEndpointConf()); err != nil {
+			logger.Warn("[IP_MONITOR] Companion sender rebuild failed (%s): %v", reason, err)
+		}
+
 		logger.Info("[IP_MONITOR] Sender node rebuilt (%s)", reason)
 
 		// Signal receiveFromServer to re-subscribe to the new node's event channel
@@ -1291,7 +1640,7 @@ func (f *Forwarder) monitorIPChange() {
 		default:
 		}
 
-		if f.authClient != nil {
+		if f.authClient != nil && reason != "initial-bind" {
 			f.authClient.ForceReconnect()
 		}
 
@@ -1301,6 +1650,7 @@ func (f *Forwarder) monitorIPChange() {
 	}
 
 	checkIP := func() {
+		f.checkPhysicalEgressChange(rebuildSender)
 		currentIP := f.getCurrentIP()
 
 		// ── Network is DOWN ──────────────────────────────────────────────
@@ -1405,6 +1755,12 @@ func (f *Forwarder) reportBandwidth() {
 				logger.Info("[BANDWIDTH] In: %d B/s | Out: %d B/s", recv, sent)
 			}
 
+			outMsgs := pktSec.outServerForward + pktSec.outServerGenerated
+			if sent == 0 && outMsgs > 0 {
+				// UDP client path may not wrap loggedConn; estimate ~120 B per MAVLink frame.
+				sent = outMsgs * 120
+			}
+
 			if len(msgIn) > 0 || len(msgOut) > 0 {
 				logger.Info("[MSGID][UPLINK] in14540/s top=%s | outServer/s top=%s | extraOut/s=%s",
 					formatTopMsgIDs(msgIn, 6),
@@ -1413,7 +1769,7 @@ func (f *Forwarder) reportBandwidth() {
 				)
 			}
 
-			logger.Info("[PKT_SEC][UPLINK] rawIn14540/s=%d accepted/s=%d outServerForward/s=%d outServerGenerated/s=%d drop/s={sys255:%d dup:%d noPixhawk:%d unhealthy:%d sendErr:%d}",
+			logger.Info("[PKT_SEC][UPLINK] rawIn14540/s=%d accepted/s=%d outServerForward/s=%d outServerGenerated/s=%d drop/s={sys255:%d dup:%d noPixhawk:%d vpnNotReady:%d unhealthy:%d sendErr:%d}",
 				pktSec.rawIn14540,
 				pktSec.acceptedIn14540,
 				pktSec.outServerForward,
@@ -1421,11 +1777,12 @@ func (f *Forwarder) reportBandwidth() {
 				pktSec.dropSysID255,
 				pktSec.dropDuplicate,
 				pktSec.dropNoPixhawk,
+				pktSec.dropVPNNotReady,
 				pktSec.dropUnhealthy,
 				pktSec.dropSendError,
 			)
 
-			logger.Info("[PKT_TOTAL][UPLINK] rawIn14540=%d accepted=%d outServerForward=%d outServerGenerated=%d acceptedDrop=%d(%.2f%%) breakdown={sys255:%d dup:%d noPixhawk:%d unhealthy:%d sendErr:%d}",
+			logger.Info("[PKT_TOTAL][UPLINK] rawIn14540=%d accepted=%d outServerForward=%d outServerGenerated=%d acceptedDrop=%d(%.2f%%) breakdown={sys255:%d dup:%d noPixhawk:%d vpnNotReady:%d unhealthy:%d sendErr:%d}",
 				pktTot.rawIn14540,
 				pktTot.acceptedIn14540,
 				pktTot.outServerForward,
@@ -1435,6 +1792,7 @@ func (f *Forwarder) reportBandwidth() {
 				pktTot.dropSysID255,
 				pktTot.dropDuplicate,
 				pktTot.dropNoPixhawk,
+				pktTot.dropVPNNotReady,
 				pktTot.dropUnhealthy,
 				pktTot.dropSendError,
 			)
@@ -1446,6 +1804,13 @@ func (f *Forwarder) reportBandwidth() {
 					formatTopMsgIDs(extraToPixhawk, 6),
 				)
 			}
+
+			metrics.Global.SetUdpRates(
+				float64(pktSec.rawIn14540),
+				float64(pktSec.acceptedIn14540),
+				float64(pktSec.outServerForward+pktSec.outServerGenerated),
+				float64(sent),
+			)
 		}
 	}
 }

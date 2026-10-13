@@ -1,0 +1,16 @@
+[Unit]
+Description=DroneBridge Docker Bootstrap (git pull + auto install)
+After=docker.service network-online.target
+Wants=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=__DOCKER_DIR__
+ExecStart=__DOCKER_DIR__/compose.sh up -d --build --force-recreate
+ExecStop=__DOCKER_DIR__/compose.sh down
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+# SIM7600 (1e0e) QMI netdev → wwan0 cố định
+# Chạy trước 80-net-setup-link (prefix 76). Xem INTERFACE_POLICY.md §10.
+#
+# Sau khi copy:
+#   sudo cp etc/udev/rules.d/76-dronebridge-sim7600-wwan.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger -c add -s net
+
+SUBSYSTEM=="net", ACTION=="add", SUBSYSTEMS=="usb", ATTRS{idVendor}=="1e0e", \
+  KERNEL=="wwu*", NAME="wwan0"
+
+SUBSYSTEM=="net", ACTION=="add", SUBSYSTEMS=="usb", ATTRS{idVendor}=="1e0e", \
+  KERNEL=="wwan[0-9]*", NAME="wwan0"

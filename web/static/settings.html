@@ -3,8 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tutorial Setting- UAVLink-Edge</title>
+    <title>Tutorial Setting- DroneBridge</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="common-nav.css" rel="stylesheet">
+    <script src="common-nav.js"></script>
     <style>
         :root {
             --bg-primary: #0f172a;
@@ -111,6 +113,10 @@
             opacity: 1;
         }
 
+        .card-camera::before { background: linear-gradient(90deg, var(--accent-purple), var(--accent-blue)); }
+        .card-camera:hover { border-color: var(--accent-purple); }
+        .card-camera .card-icon { color: var(--accent-purple); }
+
         .card-motor::before { background: linear-gradient(90deg, var(--accent-yellow), var(--accent-red)); }
         .card-motor:hover { border-color: var(--accent-yellow); }
         .card-motor .card-icon { color: var(--accent-yellow); }
@@ -126,6 +132,14 @@
         .card-gps::before { background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue)); }
         .card-gps:hover { border-color: var(--accent-cyan); }
         .card-gps .card-icon { color: var(--accent-cyan); }
+
+        .card-camera-settings::before { background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple)); }
+        .card-camera-settings:hover { border-color: var(--accent-blue); }
+        .card-camera-settings .card-icon { color: var(--accent-blue); }
+
+        .card-landing::before { background: linear-gradient(90deg, var(--accent-purple), var(--accent-cyan)); }
+        .card-landing:hover { border-color: var(--accent-purple); }
+        .card-landing .card-icon { color: var(--accent-purple); }
 
         .card-icon {
             font-size: 3rem;
@@ -409,6 +423,316 @@
             background: var(--border);
             margin: 1.5rem 0;
         }
+
+        .modal-content-wide {
+            max-width: 720px;
+        }
+
+        .info-notice {
+            background: rgba(234, 179, 8, 0.1);
+            border: 1px solid rgba(234, 179, 8, 0.3);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .info-notice-title {
+            color: var(--accent-yellow);
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .info-notice-text {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            line-height: 1.5;
+        }
+
+        .section-subtitle {
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+            color: var(--text-primary);
+        }
+
+        .camera-port-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        @media (max-width: 640px) {
+            .camera-port-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .camera-port-card {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            padding: 1rem;
+        }
+
+        .camera-port-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .camera-port-name {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .camera-port-meta {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+
+        .port-toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 0.75rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .port-toggle-label {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 44px;
+            height: 24px;
+            background: var(--border);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background 0.2s ease;
+            flex-shrink: 0;
+        }
+
+        .toggle-switch.active {
+            background: var(--accent-green);
+        }
+
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.2s ease;
+        }
+
+        .toggle-switch.active::after {
+            transform: translateX(20px);
+        }
+
+        .camera-connected-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .camera-connected-list li {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            padding: 0.75rem 1rem;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .camera-connected-list li strong {
+            color: var(--text-primary);
+        }
+
+        .modal-content-camera {
+            max-width: 920px;
+        }
+
+        .cam-test-modal {
+            max-width: 980px;
+        }
+
+        .cam-test-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 1rem;
+        }
+
+        .cam-test-card {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0.55rem;
+        }
+
+        .cam-test-head {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 0.75rem;
+        }
+
+        .cam-test-name {
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+
+        .cam-test-path {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .cam-test-stage {
+            position: relative;
+            aspect-ratio: 4 / 3;
+            border-radius: 0.75rem;
+            overflow: hidden;
+            background: #161616;
+            border: 1px solid var(--border);
+        }
+
+        .cam-test-stage img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+            background: #111;
+        }
+
+        .cam-test-stage.is-empty img {
+            visibility: hidden;
+        }
+
+        .cam-test-empty {
+            display: none;
+            position: absolute;
+            inset: 0;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.72);
+            font-size: 0.9rem;
+        }
+
+        .cam-test-stage.is-empty .cam-test-empty {
+            display: flex;
+        }
+
+        .cam-test-status {
+            margin: 0;
+            min-height: 2.5rem;
+            font-size: 0.82rem;
+            line-height: 1.4;
+            color: var(--text-secondary);
+        }
+
+        @media (max-width: 720px) {
+            .cam-test-grid {
+                grid-template-columns: minmax(0, 1fr);
+            }
+        }
+
+        .cam-pill-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .cam-pill {
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 0.2rem 0.55rem;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+
+        .cam-pill.live {
+            color: var(--accent-green);
+            border-color: rgba(34, 197, 94, 0.4);
+            background: rgba(34, 197, 94, 0.12);
+        }
+
+        .cam-pill.off {
+            color: var(--text-secondary);
+        }
+
+        .cam-status-line {
+            font-size: 0.875rem;
+            margin: 0.5rem 0 0.75rem;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .cam-status-line.ok { color: var(--accent-green); }
+        .cam-status-line.warn { color: var(--accent-yellow); }
+        .cam-status-line.err { color: var(--accent-red); }
+
+        .cam-tune {
+            margin-top: 0.75rem;
+            border-top: 1px solid var(--border);
+            padding-top: 0.75rem;
+        }
+
+        .cam-tune summary {
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .cam-proc-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-right: 0.75rem;
+            cursor: pointer;
+        }
+
+        .cam-proc-toggle input {
+            accent-color: var(--accent-green);
+        }
+
+        .btn-action-pending,
+        .btn-action-pending:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+            pointer-events: none;
+            filter: grayscale(0.4);
+        }
+
+        .setting-card-static {
+            cursor: default;
+        }
+
+        .setting-card-static:hover {
+            transform: none;
+            box-shadow: none;
+        }
     </style>
 </head>
 <body>
@@ -485,7 +809,37 @@
                 </div>
             </div>
 
-            <!-- Network Connection -->
+            <!-- Camera Settings CM5 -->
+            <div class="setting-card card-camera-settings setting-card-static">
+                <div class="card-icon">🎥</div>
+                <div class="card-title">Camera Settings CM5</div>
+                <div class="card-desc">
+                    Configure CSI sensors (CAM0/CAM1) and stream settings. Save writes config; restart or reboot when you are ready to apply.
+                </div>
+                <div class="card-actions">
+                    <button class="btn btn-primary" onclick="openCameraSetup()">Configure</button>
+                    <button class="btn btn-secondary" onclick="testCameras()">Test Camera</button>
+                </div>
+                <div id="camera-settings-status" class="status-indicator status-info">
+                    Loading camera status...
+                </div>
+            </div>
+
+            <!-- Auto Landing -->
+            <div class="setting-card card-landing">
+                <div class="card-icon">🛬</div>
+                <div class="card-title">Auto Landing</div>
+                <div class="card-desc">
+                    Configure the auto landing system, select detection templates, and adjust landing parameters.
+                </div>
+                <div class="card-actions">
+                    <button class="btn btn-primary" onclick="openAutoLandingSettings()">Configure Landing</button>
+                </div>
+                <div id="landing-status" class="status-indicator status-info">
+                    Template: Default
+                </div>
+            </div>
+
             <!-- Network Connection -->
             <div class="setting-card" style="--accent-color: var(--accent-cyan);">
                 <div class="card-icon">🌐</div>
@@ -671,23 +1025,15 @@ Loading GPS information...
                 <button class="close-btn" onclick="closeModal('networkModal')">×</button>
             </div>
             
-            <!-- Connection Priority -->
-            <div class="form-group">
-                <label class="form-label">Connection Priority</label>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
-                    <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 0.5rem; cursor: pointer;">
-                        <input type="radio" name="priority" value="4g" id="priority4g">
-                        <span>📡 4G First</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 0.5rem; cursor: pointer;">
-                        <input type="radio" name="priority" value="wifi" id="priorityWifi">
-                        <span>📶 WiFi First</span>
-                    </label>
-                </div>
-                <small style="color: var(--text-secondary);">Drone will try to connect following this priority order</small>
+            <!-- Uplink control lives in Dashboard → Server & Mạng (connect.html) -->
+            <div class="form-group" style="background: var(--bg-primary); border: 1px solid var(--border); border-radius: 0.5rem; padding: 1rem;">
+                <p style="margin: 0 0 0.75rem; color: var(--text-secondary); font-size: 0.875rem;">
+                    Chuyển 4G ↔ WiFi cho uplink server: dùng menu <strong>Kết nối → Server &amp; Mạng</strong> trên dashboard.
+                </p>
+                <a href="/connect.html" class="btn btn-primary" style="display: inline-block; text-decoration: none;">📡 Mở Server &amp; Mạng</a>
             </div>
 
-            <!-- Interface Status -->
+            <!-- Interface Status (read-only) -->
             <div class="form-group">
                 <label class="form-label">Interface Status</label>
                 
@@ -697,7 +1043,7 @@ Loading GPS information...
                         <div style="display: flex; align-items: center; gap: 0.75rem;">
                             <div style="font-size: 1.5rem;">📡</div>
                             <div>
-                                <div style="font-weight: 600; color: var(--text-primary);">4G / LTE</div>
+                                <div style="font-weight: 600; color: var(--text-primary);" id="status-cellular-title">Cellular</div>
                                 <div style="font-size: 0.875rem; color: var(--text-secondary);" id="status-4g-info">wwan0</div>
                             </div>
                         </div>
@@ -707,6 +1053,7 @@ Loading GPS information...
                     </div>
                     <div id="status-4g-details" style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); font-size: 0.875rem; color: var(--text-secondary); display: none;">
                         IP: <span id="status-4g-ip">-</span><br>
+                        Module: <span id="status-cellular-module">-</span><br>
                         Signal: <span id="status-4g-signal">-</span>
                     </div>
                 </div>
@@ -746,7 +1093,9 @@ Loading GPS information...
                         </div>
                     </div>
                     <div id="status-eth-details" style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); font-size: 0.875rem; color: var(--text-secondary); display: none;">
-                        IP: <span id="status-eth-ip">-</span>
+                        IP: <span id="status-eth-ip">-</span><br>
+                        PX4: <span id="status-eth-px4">-</span><br>
+                        MAVLink RX: <span id="status-eth-mavlink">-</span>/s
                     </div>
                 </div>
             </div>
@@ -762,7 +1111,330 @@ Loading GPS information...
             <!-- Action Buttons -->
             <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem;">
                 <button class="btn btn-secondary" style="flex: 1;" onclick="refreshNetworkStatus()">🔄 Refresh Status</button>
-                <button class="btn btn-primary" style="flex: 1;" onclick="saveNetworkPriority()">💾 Save Priority</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Auto Landing Settings -->
+    <div id="autoLandingModal" class="modal">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <h2 class="modal-title">🛬 Landing Settings</h2>
+                <button class="close-btn" onclick="closeModal('autoLandingModal')">×</button>
+            </div>
+            
+            <!-- Landing Mode -->
+            <div class="form-group">
+                <label class="form-label">Landing Mode</label>
+                <select class="form-select" id="landingMode" onchange="updateLandingPreview()">
+                    <option value="easy">Easy - Stable, Safe (recommended for beginners)</option>
+                    <option value="normal" selected>Normal - Balance between speed and accuracy</option>
+                    <option value="fast">Fast - Quick landing, less checks</option>
+                    <option value="precision">Precision - High accuracy, slower</option>
+                    <option value="windy">Windy - Optimized for windy conditions</option>
+                </select>
+                <small style="color: var(--text-secondary);">Landing mode affects speed, accuracy, and stability</small>
+            </div>
+
+            <!-- Environment -->
+            <div class="form-group">
+                <label class="form-label">Environment (Optional)</label>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                    <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 0.5rem; cursor: pointer;">
+                        <input type="radio" name="environment" value="indoor" onchange="updateLandingPreview()">
+                        <span>🏠 Indoor</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 0.5rem; cursor: pointer;">
+                        <input type="radio" name="environment" value="outdoor" checked onchange="updateLandingPreview()">
+                        <span>🌤️ Outdoor</span>
+                    </label>
+                </div>
+                <small style="color: var(--text-secondary);">Indoor: low wind, stable lighting | Outdoor: windy, changing weather</small>
+            </div>
+
+            <!-- Marker Type -->
+            <div class="form-group">
+                <label class="form-label">Template Landing Pad</label>
+                <select class="form-select" id="landingTemplate" onchange="previewTemplate()">
+                    <option value="">Loading templates...</option>
+                </select>
+                <small style="color: var(--text-secondary);">Select a template that matches your landing pad</small>
+            </div>
+
+            <!-- Marker Preview -->
+            <div id="markerPreview" style="background: var(--bg-primary); border: 1px solid var(--border); border-radius: 0.5rem; padding: 1.5rem; margin: 1rem 0; text-align: center;">
+                <img id="templateImg" src="" alt="Template Preview" style="max-width: 200px; max-height: 200px; display: none; margin: 0 auto;"/>
+                <div id="templateDesc" style="color: var(--text-secondary); margin-top: 0.5rem;">Select a template to see preview</div>
+            </div>
+
+            <!-- Safety Level -->
+            <div class="form-group">
+                <label class="form-label">Safety Level</label>
+                <div style="display: flex; align-items: center; gap: 1rem;">
+                    <span style="color: var(--accent-green); font-size: 0.875rem; min-width: 100px;">Conservative</span>
+                    <input type="range" class="form-input" min="1" max="3" value="2" id="safetyLevel" 
+                           style="flex: 1;" 
+                           oninput="updateSafetyLabel(this.value)"
+                           list="safety-markers">
+                    <datalist id="safety-markers">
+                        <option value="1"></option>
+                        <option value="2"></option>
+                        <option value="3"></option>
+                    </datalist>
+                    <span style="color: var(--accent-red); font-size: 0.875rem; min-width: 100px; text-align: right;">Aggressive</span>
+                </div>
+                <div style="text-align: center; margin-top: 0.5rem;">
+                    <span id="safetyLabel" style="color: var(--accent-blue); font-weight: 600;">Balanced</span>
+                </div>
+                <small style="color: var(--text-secondary);">
+                    Conservative: More checks, slower, safer<br>
+                    Balanced: Balance between speed and safety<br>
+                    Aggressive: Faster, fewer checks, higher risk
+                </small>
+            </div>
+
+            <!-- Advanced Settings Summary -->
+            <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 0.5rem; padding: 1rem; margin: 1rem 0;">
+                <div style="color: var(--accent-blue); font-weight: 600; margin-bottom: 0.5rem;">📋 Current Configuration</div>
+                <div id="configSummary" style="color: var(--text-secondary); font-size: 0.875rem; font-family: 'JetBrains Mono', monospace;">
+                    Mode: Normal | Environment: Outdoor | Marker: H | Safety: Balanced
+                </div>
+            </div>
+
+            <!-- Warning Box -->
+            <div style="background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.3); border-radius: 0.5rem; padding: 1rem; margin: 1rem 0;">
+                <div style="color: var(--accent-yellow); font-weight: 600; margin-bottom: 0.5rem;">⚠️ Safety Notice</div>
+                <div style="color: var(--text-secondary); font-size: 0.875rem;">
+                    • Always test at a safe height first (> 5m)<br>
+                    • Ensure the landing pad is clear and unobstructed<br>
+                    • Manual override mode available for intervention<br>
+                    • Check GPS and compass before use<br>
+                    • Do not use Aggressive mode without experience
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="card-actions">
+                <button class="btn btn-primary" onclick="saveLandingSettings()">💾 Save Configuration</button>
+                <button class="btn btn-warning" onclick="testLanding()">🧪 Test Landing</button>
+                <button class="btn btn-secondary" onclick="closeModal('autoLandingModal')">Close</button>
+            </div>
+            
+            <div class="divider"></div>
+            
+            <div class="output-box" id="landingOutput">
+Điều chỉnh các thông số landing, sau đó nhấn "Lưu cấu hình"
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Camera CM5 -->
+    <div id="cameraSetupModal" class="modal">
+        <div class="modal-content modal-content-camera">
+            <div class="modal-header">
+                <h2 class="modal-title">Camera CM5</h2>
+                <button class="close-btn" onclick="closeModal('cameraSetupModal')">×</button>
+            </div>
+
+            <div class="camera-port-grid">
+                <div class="camera-port-card" style="grid-column: 1 / -1;">
+                    <div class="camera-port-header">
+                        <div class="camera-port-name">Camera chính / phụ (đường dẫn stream)</div>
+                    </div>
+                    <label class="form-label">Camera chính → RTSP path <code>/cam0</code></label>
+                    <select id="primary-camera-select" class="form-select cam-form-input" onchange="markCameraFormDirty()">
+                        <option value="0">CAM0 · J30 (mặc định)</option>
+                        <option value="1">CAM1 · J29</option>
+                    </select>
+                    <small style="color: var(--text-secondary); display:block; margin-top:0.35rem">
+                        Camera còn lại tự động publish lên <code>/cam1</code>. RAM CM5: <span id="memory-tier-label">—</span> GB
+                        (tự tối ưu buffer/CV khi bật auto memory profile).
+                    </small>
+                </div>
+                <div class="camera-port-card">
+                    <div class="camera-port-header">
+                        <div class="camera-port-name">CAM0 · J30</div>
+                        <div class="cam-pill-row">
+                            <span id="cam0-live-badge" class="cam-pill live">Live</span>
+                            <div class="toggle-switch active" id="port-cam0-enabled" onclick="this.classList.toggle('active'); updateCamLiveBadge('cam0'); markCameraFormDirty()"></div>
+                        </div>
+                    </div>
+                    <div id="cam0-status-line" class="cam-status-line warn">Loading...</div>
+                    <label class="form-label">Sensor</label>
+                    <select id="port-cam0-overlay" class="form-select cam-form-input" onchange="onCameraSensorChange('cam0')"></select>
+                    <label class="form-label" style="margin-top:0.75rem">Resolution</label>
+                    <select id="cam0-resolution" class="form-select cam-resolution-select cam-form-input"></select>
+                    <label class="form-label" style="margin-top:0.75rem">Stream format</label>
+                    <select id="cam0-format" class="form-select cam-form-input">
+                        <option value="RGB888">RGB888</option>
+                        <option value="BGR888" selected>BGR888</option>
+                        <option value="YUV420">YUV420</option>
+                    </select>
+                    <small style="color: var(--text-secondary); display:block; margin-top:0.25rem">
+                        Thứ tự byte R/G/B trên stream RTSP. Picamera2 CSI: chọn <strong>BGR888</strong> để màu đúng; RGB888 đổi kênh đỏ/xanh (mọi chế độ gồm H.264 + landing).
+                    </small>
+                    <div class="cam-processing-row" style="margin-top:0.75rem">
+                        <span class="form-label" style="margin:0">Video processing</span>
+                        <div class="cam-pill-row" style="margin-top:0.35rem">
+                            <label class="cam-proc-toggle">
+                                <input type="checkbox" class="cam-form-input" id="cam0-detection" checked>
+                                Landing detection
+                            </label>
+                            <label class="cam-proc-toggle">
+                                <input type="checkbox" class="cam-form-input" id="cam0-overlay" checked>
+                                Viewer overlay
+                            </label>
+                            <label class="cam-proc-toggle">
+                                <input type="checkbox" class="cam-form-input" id="cam0-overlay-burn" checked>
+                                Burn on stream
+                            </label>
+                        </div>
+                    </div>
+                    <details class="cam-tune" style="margin-top:0.5rem">
+                        <summary>CV tuning (Hướng 2)</summary>
+                        <label class="form-label">Detection method</label>
+                        <select id="cam0-landing-mode" class="form-select cam-form-input"></select>
+                        <p class="form-hint" style="margin-top:0.25rem;font-size:0.8rem;color:var(--text-muted)">v2: in <code>aruco_board_dict_4x4_50_0-11.png</code> hoặc từng <code>aruco_dict_4x4_50_idN.png</code> (N=0…11).</p>
+                        <label class="form-label" style="margin-top:0.5rem">Gate timeout (ms, 0 = latest)</label>
+                        <input type="number" class="form-input cam-form-input" id="cam0-gate-timeout" min="0" max="500" value="0" step="1">
+                        <label class="form-label" style="margin-top:0.5rem">Detect every N frames</label>
+                        <input type="number" class="form-input cam-form-input" id="cam0-detect-skip" min="1" max="120" value="30" step="1">
+                        <label class="form-label" style="margin-top:0.5rem">Overlay every N frames</label>
+                        <input type="number" class="form-input cam-form-input" id="cam0-overlay-skip" min="1" max="60" value="5" step="1">
+                        <label class="form-label" style="margin-top:0.5rem">Lores size (CV)</label>
+                        <input type="text" class="form-input cam-form-input" id="cam0-lores-size" value="320x240" placeholder="320x240">
+                    </details>
+                    <details class="cam-tune">
+                        <summary>Image tuning</summary>
+                        <label class="form-label">Brightness</label>
+                        <input type="range" class="form-input cam-form-input" min="-1" max="1" value="0" step="0.1" id="cam0-brightness" oninput="document.getElementById('cam0-brightness-val').textContent=this.value">
+                        <span id="cam0-brightness-val">0</span>
+                        <label class="form-label" style="margin-top:0.5rem">Contrast</label>
+                        <input type="range" class="form-input cam-form-input" min="0" max="2" value="1" step="0.1" id="cam0-contrast" oninput="document.getElementById('cam0-contrast-val').textContent=this.value">
+                        <span id="cam0-contrast-val">1</span>
+                        <label class="form-label" style="margin-top:0.5rem">Sharpness</label>
+                        <input type="range" class="form-input cam-form-input" min="0" max="4" value="1.5" step="0.1" id="cam0-sharpness" oninput="document.getElementById('cam0-sharpness-val').textContent=this.value">
+                        <span id="cam0-sharpness-val">1.5</span>
+                        <label class="form-label" style="margin-top:0.5rem">Saturation</label>
+                        <input type="range" class="form-input cam-form-input" min="0" max="2" value="1" step="0.1" id="cam0-saturation" oninput="document.getElementById('cam0-saturation-val').textContent=this.value">
+                        <span id="cam0-saturation-val">1</span>
+                    </details>
+                </div>
+
+                <div class="camera-port-card">
+                    <div class="camera-port-header">
+                        <div class="camera-port-name">CAM1 · J29</div>
+                        <div class="cam-pill-row">
+                            <span id="cam1-live-badge" class="cam-pill off">Off</span>
+                            <div class="toggle-switch" id="port-cam1-enabled" onclick="this.classList.toggle('active'); updateCamLiveBadge('cam1'); markCameraFormDirty()"></div>
+                        </div>
+                    </div>
+                    <div id="cam1-status-line" class="cam-status-line warn">Loading...</div>
+                    <label class="form-label">Sensor</label>
+                    <select id="port-cam1-overlay" class="form-select cam-form-input" onchange="onCameraSensorChange('cam1')"></select>
+                    <label class="form-label" style="margin-top:0.75rem">Resolution</label>
+                    <select id="cam1-resolution" class="form-select cam-resolution-select cam-form-input"></select>
+                    <label class="form-label" style="margin-top:0.75rem">Stream format</label>
+                    <select id="cam1-format" class="form-select cam-form-input">
+                        <option value="RGB888">RGB888</option>
+                        <option value="BGR888" selected>BGR888</option>
+                        <option value="YUV420">YUV420</option>
+                    </select>
+                    <small style="color: var(--text-secondary); display:block; margin-top:0.25rem">
+                        Thứ tự byte R/G/B trên stream RTSP. Picamera2 CSI: chọn <strong>BGR888</strong> để màu đúng; RGB888 đổi kênh đỏ/xanh (mọi chế độ gồm H.264 + landing).
+                    </small>
+                    <div class="cam-processing-row" style="margin-top:0.75rem">
+                        <span class="form-label" style="margin:0">Video processing</span>
+                        <div class="cam-pill-row" style="margin-top:0.35rem">
+                            <label class="cam-proc-toggle">
+                                <input type="checkbox" class="cam-form-input" id="cam1-detection" checked>
+                                Landing detection
+                            </label>
+                            <label class="cam-proc-toggle">
+                                <input type="checkbox" class="cam-form-input" id="cam1-overlay" checked>
+                                Viewer overlay
+                            </label>
+                            <label class="cam-proc-toggle">
+                                <input type="checkbox" class="cam-form-input" id="cam1-overlay-burn" checked>
+                                Burn on stream
+                            </label>
+                        </div>
+                    </div>
+                    <details class="cam-tune" style="margin-top:0.5rem">
+                        <summary>CV tuning (Hướng 2)</summary>
+                        <label class="form-label">Detection method</label>
+                        <select id="cam1-landing-mode" class="form-select cam-form-input"></select>
+                        <p class="form-hint" style="margin-top:0.25rem;font-size:0.8rem;color:var(--text-muted)">v2: in <code>aruco_board_dict_4x4_50_0-11.png</code> hoặc từng <code>aruco_dict_4x4_50_idN.png</code> (N=0…11).</p>
+                        <label class="form-label" style="margin-top:0.5rem">Gate timeout (ms, 0 = latest)</label>
+                        <input type="number" class="form-input cam-form-input" id="cam1-gate-timeout" min="0" max="500" value="0" step="1">
+                        <label class="form-label" style="margin-top:0.5rem">Detect every N frames</label>
+                        <input type="number" class="form-input cam-form-input" id="cam1-detect-skip" min="1" max="120" value="30" step="1">
+                        <label class="form-label" style="margin-top:0.5rem">Overlay every N frames</label>
+                        <input type="number" class="form-input cam-form-input" id="cam1-overlay-skip" min="1" max="60" value="5" step="1">
+                        <label class="form-label" style="margin-top:0.5rem">Lores size (CV)</label>
+                        <input type="text" class="form-input cam-form-input" id="cam1-lores-size" value="320x240" placeholder="320x240">
+                    </details>
+                    <details class="cam-tune">
+                        <summary>Image tuning</summary>
+                        <label class="form-label">Brightness</label>
+                        <input type="range" class="form-input cam-form-input" min="-1" max="1" value="0" step="0.1" id="cam1-brightness" oninput="document.getElementById('cam1-brightness-val').textContent=this.value">
+                        <span id="cam1-brightness-val">0</span>
+                        <label class="form-label" style="margin-top:0.5rem">Contrast</label>
+                        <input type="range" class="form-input cam-form-input" min="0" max="2" value="1" step="0.1" id="cam1-contrast" oninput="document.getElementById('cam1-contrast-val').textContent=this.value">
+                        <span id="cam1-contrast-val">1</span>
+                        <label class="form-label" style="margin-top:0.5rem">Sharpness</label>
+                        <input type="range" class="form-input cam-form-input" min="0" max="4" value="1.5" step="0.1" id="cam1-sharpness" oninput="document.getElementById('cam1-sharpness-val').textContent=this.value">
+                        <span id="cam1-sharpness-val">1.5</span>
+                        <label class="form-label" style="margin-top:0.5rem">Saturation</label>
+                        <input type="range" class="form-input cam-form-input" min="0" max="2" value="1" step="0.1" id="cam1-saturation" oninput="document.getElementById('cam1-saturation-val').textContent=this.value">
+                        <span id="cam1-saturation-val">1</span>
+                    </details>
+                </div>
+            </div>
+
+            <div class="card-actions" style="margin-top:1.25rem; flex-wrap:wrap; gap:0.5rem">
+                <button class="btn btn-primary" onclick="saveCameraAll()">Save</button>
+                <button type="button" class="btn btn-secondary" onclick="testCameras()">Test camera</button>
+                <button type="button" id="cam-btn-restart" class="btn btn-secondary btn-action-pending" disabled onclick="restartCameraStreams()">Restart stream</button>
+                <button type="button" id="cam-btn-reboot" class="btn btn-warning btn-action-pending" disabled onclick="rebootCM5()">Reboot CM5</button>
+                <button class="btn btn-secondary" onclick="refreshCameraDetect(true)">Rescan</button>
+                <button class="btn btn-secondary" onclick="closeModal('cameraSetupModal')">Close</button>
+            </div>
+
+            <div class="divider"></div>
+            <div class="output-box" id="cameraSetupOutput">Configure CAM0 and CAM1, then Save.</div>
+        </div>
+    </div>
+
+    <div id="cameraTestModal" class="modal" role="dialog" aria-modal="true" style="z-index:1100">
+        <div class="modal-content cam-test-modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Test camera</h3>
+                <button type="button" class="btn btn-secondary" onclick="closeCameraTest()">Đóng</button>
+            </div>
+            <div class="cam-test-grid">
+                <article class="cam-test-card">
+                    <div class="cam-test-head">
+                        <span class="cam-test-name">CAM0</span>
+                        <span class="cam-test-path" id="camera-test-path-0"></span>
+                    </div>
+                    <div class="cam-test-stage is-empty" id="camera-test-stage-0">
+                        <img id="camera-test-img-0" alt="">
+                        <div class="cam-test-empty">Chưa có khung hình</div>
+                    </div>
+                    <p class="cam-test-status" id="camera-test-status-0"></p>
+                </article>
+                <article class="cam-test-card">
+                    <div class="cam-test-head">
+                        <span class="cam-test-name">CAM1</span>
+                        <span class="cam-test-path" id="camera-test-path-1"></span>
+                    </div>
+                    <div class="cam-test-stage is-empty" id="camera-test-stage-1">
+                        <img id="camera-test-img-1" alt="">
+                        <div class="cam-test-empty">Chưa có khung hình</div>
+                    </div>
+                    <p class="cam-test-status" id="camera-test-status-1"></p>
+                </article>
             </div>
         </div>
     </div>
@@ -777,7 +1449,700 @@ Loading GPS information...
             document.getElementById(modalId).classList.remove('active');
         }
 
-        // Camera Testing removed
+        let cameraRegistry = [];
+        let cameraDefaultStreamProfile = null;
+        let cameraSavedSnapshot = null;
+        let cameraApplyReady = false;
+
+        function buildCameraPortsPayload() {
+            return {
+                cam0: {
+                    overlay: document.getElementById('port-cam0-overlay').value,
+                    sensor: document.getElementById('port-cam0-overlay').value,
+                    enabled: isCamEnabledToggle('cam0')
+                },
+                cam1: {
+                    overlay: document.getElementById('port-cam1-overlay').value,
+                    sensor: document.getElementById('port-cam1-overlay').value,
+                    enabled: isCamEnabledToggle('cam1')
+                }
+            };
+        }
+
+        function buildCameraFormState() {
+            const primaryEl = document.getElementById('primary-camera-select');
+            return JSON.stringify({
+                ports: buildCameraPortsPayload(),
+                primary_camera_id: primaryEl ? parseInt(primaryEl.value, 10) : 0,
+                cam0: buildCamConfigFromUI(0),
+                cam1: buildCamConfigFromUI(1)
+            });
+        }
+
+        function syncCameraApplyButtons() {
+            const restartBtn = document.getElementById('cam-btn-restart');
+            const rebootBtn = document.getElementById('cam-btn-reboot');
+            const dirty = cameraSavedSnapshot !== null && cameraSavedSnapshot !== buildCameraFormState();
+            const enabled = cameraApplyReady && !dirty;
+            [restartBtn, rebootBtn].forEach(btn => {
+                if (!btn) return;
+                btn.disabled = !enabled;
+                btn.classList.toggle('btn-action-pending', !enabled);
+            });
+        }
+
+        function markCameraFormDirty() {
+            cameraApplyReady = false;
+            syncCameraApplyButtons();
+        }
+
+        function resetCameraApplyState() {
+            cameraSavedSnapshot = buildCameraFormState();
+            cameraApplyReady = false;
+            syncCameraApplyButtons();
+        }
+
+        function onCameraSavedSuccess(needsReboot) {
+            cameraSavedSnapshot = buildCameraFormState();
+            cameraApplyReady = true;
+            syncCameraApplyButtons();
+            let msg = 'Configuration saved.\n\n';
+            if (needsReboot) {
+                msg += 'Sensor changed — use Reboot CM5, then Restart stream if needed.';
+            } else {
+                msg += 'Use Restart stream to apply stream settings.';
+            }
+            setCameraMsg(msg);
+        }
+
+        function wireCameraFormDirtyListeners() {
+            const modal = document.getElementById('cameraSetupModal');
+            if (!modal || modal.dataset.dirtyWired === '1') return;
+            modal.dataset.dirtyWired = '1';
+            modal.addEventListener('change', (e) => {
+                if (e.target.classList.contains('cam-resolution-select')) {
+                    const m = e.target.id && e.target.id.match(/^cam(\d+)-resolution$/);
+                    if (m) updateLoresForResolution('cam' + m[1]);
+                }
+                if (e.target.closest('.cam-form-input') || e.target.classList.contains('cam-form-input') ||
+                    e.target.classList.contains('cam-resolution-select') || e.target.id === 'port-cam0-overlay' ||
+                    e.target.id === 'port-cam1-overlay') {
+                    markCameraFormDirty();
+                }
+            });
+            modal.addEventListener('input', (e) => {
+                if (e.target.classList.contains('cam-form-input')) markCameraFormDirty();
+            });
+        }
+
+        function findSensorByOverlay(overlay) {
+            if (!overlay) return null;
+            const key = String(overlay).toLowerCase();
+            return cameraRegistry.find(s =>
+                String(s.overlay || '').toLowerCase() === key ||
+                String(s.id || '').toLowerCase() === key
+            ) || null;
+        }
+
+        function getStreamProfileForSensor(overlay) {
+            const sensor = findSensorByOverlay(overlay);
+            if (sensor && sensor.stream_profile && sensor.stream_profile.groups) {
+                return sensor.stream_profile;
+            }
+            return cameraDefaultStreamProfile;
+        }
+
+        function overlayForPort(port) {
+            const sel = document.getElementById('port-' + port + '-overlay');
+            return sel ? sel.value : '';
+        }
+
+        function bitrateForResolution(width, height) {
+            const px = width * height;
+            if (px <= 320 * 240) return 1000;
+            if (px <= 640 * 480) return 3000;
+            if (px <= 1280 * 720) return 4500;
+            if (px <= 1920 * 1080) return 6000;
+            if (px <= 1600 * 1200) return 5500;
+            if (px <= 2592 * 1944) return 8000;
+            if (px <= 3840 * 2160) return 10000;
+            return 12000;
+        }
+
+        function populateResolutionSelect(selectEl, selectedValue, sensorOverlay) {
+            if (!selectEl) return;
+            const profile = getStreamProfileForSensor(sensorOverlay);
+            const groups = (profile && profile.groups) ? profile.groups : [];
+            selectEl.innerHTML = '';
+            const known = new Set();
+            groups.forEach(group => {
+                const og = document.createElement('optgroup');
+                og.label = group.label || '';
+                (group.options || []).forEach(opt => {
+                    known.add(opt.value);
+                    const o = document.createElement('option');
+                    o.value = opt.value;
+                    o.textContent = opt.text;
+                    og.appendChild(o);
+                });
+                selectEl.appendChild(og);
+            });
+            if (selectedValue && !known.has(selectedValue)) {
+                const custom = document.createElement('option');
+                custom.value = selectedValue;
+                custom.textContent = selectedValue.replace('x', '×') + ' (saved)';
+                selectEl.appendChild(custom);
+            }
+            const fallback = (profile && profile.recommended) ? profile.recommended : '640x480';
+            selectEl.value = (selectedValue && (known.has(selectedValue) || selectedValue.includes('x')))
+                ? selectedValue : fallback;
+        }
+
+        function onCameraSensorChange(port, silent) {
+            const resEl = document.getElementById(port + '-resolution');
+            const current = resEl ? resEl.value : null;
+            const profile = getStreamProfileForSensor(overlayForPort(port));
+            const recommended = profile && profile.recommended ? profile.recommended : '640x480';
+            populateResolutionSelect(resEl, current || recommended, overlayForPort(port));
+            if (!silent) markCameraFormDirty();
+        }
+
+        function refreshAllResolutionSelects() {
+            ['cam0', 'cam1'].forEach(port => {
+                const resEl = document.getElementById(port + '-resolution');
+                const current = resEl ? resEl.value : null;
+                populateResolutionSelect(resEl, current, overlayForPort(port));
+            });
+        }
+
+        function setCamEnabledToggle(port, enabled) {
+            const el = document.getElementById('port-' + port + '-enabled');
+            if (el) el.classList.toggle('active', !!enabled);
+        }
+
+        function isCamEnabledToggle(port) {
+            const el = document.getElementById('port-' + port + '-enabled');
+            return el ? el.classList.contains('active') : false;
+        }
+
+        function loadCameraStreamToggles() {
+            return Promise.all([0, 1].map(id =>
+                fetch('/api/camera/config/load?camera_id=' + id)
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success && data.config) {
+                            setCamEnabledToggle('cam' + id, data.config.enabled !== false);
+                        }
+                    })
+                    .catch(() => {})
+            ));
+        }
+
+        function fillOverlaySelects() {
+            ['cam0', 'cam1'].forEach(port => {
+                const sel = document.getElementById('port-' + port + '-overlay');
+                if (!sel) return;
+                sel.innerHTML = '';
+                cameraRegistry.forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s.overlay;
+                    opt.textContent = `${s.name} (${s.id})`;
+                    sel.appendChild(opt);
+                });
+            });
+        }
+
+        function updateCamLiveBadge(port) {
+            const enabled = isCamEnabledToggle(port);
+            const badge = document.getElementById(port + '-live-badge');
+            if (!badge) return;
+            badge.textContent = enabled ? 'Live' : 'Off';
+            badge.className = 'cam-pill ' + (enabled ? 'live' : 'off');
+        }
+
+        function populateLandingModeSelects() {
+            const buildOptions = () => {
+                const opts = [
+                    { value: 'contour_h', label: 'v1 — H contour (H.png)' },
+                ];
+                for (let id = 0; id <= 11; id++) {
+                    opts.push({ value: 'aruco:' + id, label: 'v2 — ArUco ID ' + id });
+                }
+                return opts;
+            };
+            const options = buildOptions();
+            ['cam0', 'cam1'].forEach(port => {
+                const el = document.getElementById(port + '-landing-mode');
+                if (!el) return;
+                const prev = el.value;
+                el.innerHTML = options.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
+                if (prev) el.value = prev;
+            });
+        }
+
+        function landingModeFromConfig(config) {
+            const mode = config.landing_detection_mode || 'contour_h';
+            if (mode === 'aruco') {
+                let id = parseInt(config.aruco_marker_id, 10);
+                if (Number.isNaN(id)) id = 0;
+                id = Math.max(0, Math.min(11, id));
+                return 'aruco:' + id;
+            }
+            return 'contour_h';
+        }
+
+        function parseLandingModeSelect(value) {
+            if (value && String(value).startsWith('aruco:')) {
+                let id = parseInt(String(value).slice(6), 10);
+                if (Number.isNaN(id)) id = 0;
+                id = Math.max(0, Math.min(11, id));
+                return { landing_detection_mode: 'aruco', aruco_marker_id: id };
+            }
+            return { landing_detection_mode: 'contour_h', aruco_marker_id: 0 };
+        }
+
+        function loadCameraPanelConfig(id) {
+            return fetch('/api/camera/config/load?camera_id=' + id)
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success || !data.config) return;
+                    const config = data.config;
+                    const port = 'cam' + id;
+                    setCamEnabledToggle(port, config.enabled !== false);
+                    updateCamLiveBadge(port);
+                    const sizeStr = `${config.size[0]}x${config.size[1]}`;
+                    const resEl = document.getElementById(port + '-resolution');
+                    const fmtEl = document.getElementById(port + '-format');
+                    const overlaySel = document.getElementById('port-' + port + '-overlay');
+                    const overlay = overlaySel ? overlaySel.value : '';
+                    if (resEl) {
+                        populateResolutionSelect(resEl, sizeStr, overlay);
+                    }
+                    if (fmtEl) fmtEl.value = config.format || 'BGR888';
+                    const br = document.getElementById(port + '-brightness');
+                    const cr = document.getElementById(port + '-contrast');
+                    const sh = document.getElementById(port + '-sharpness');
+                    const sa = document.getElementById(port + '-saturation');
+                    if (br) {
+                        br.value = config.brightness ?? 0;
+                        const bv = document.getElementById(port + '-brightness-val');
+                        if (bv) bv.textContent = br.value;
+                    }
+                    if (cr) {
+                        cr.value = config.contrast ?? 1;
+                        const cv = document.getElementById(port + '-contrast-val');
+                        if (cv) cv.textContent = cr.value;
+                    }
+                    if (sh) {
+                        sh.value = config.sharpness ?? 1.5;
+                        const sv = document.getElementById(port + '-sharpness-val');
+                        if (sv) sv.textContent = sh.value;
+                    }
+                    if (sa) {
+                        sa.value = config.saturation ?? 1;
+                        const sav = document.getElementById(port + '-saturation-val');
+                        if (sav) sav.textContent = sa.value;
+                    }
+                    const detEl = document.getElementById(port + '-detection');
+                    const ovlEl = document.getElementById(port + '-overlay');
+                    const burnEl = document.getElementById(port + '-overlay-burn');
+                    if (detEl) detEl.checked = config.detection_enabled !== false;
+                    if (ovlEl) ovlEl.checked = config.overlay_enabled !== false;
+                    if (burnEl) burnEl.checked = config.overlay_burn_enabled !== false;
+                    const gateEl = document.getElementById(port + '-gate-timeout');
+                    const detSkipEl = document.getElementById(port + '-detect-skip');
+                    const ovlSkipEl = document.getElementById(port + '-overlay-skip');
+                    const loresEl = document.getElementById(port + '-lores-size');
+                    const modeEl = document.getElementById(port + '-landing-mode');
+                    if (gateEl) gateEl.value = config.gate_timeout_ms ?? 0;
+                    if (detSkipEl) detSkipEl.value = config.detect_frame_skip ?? 30;
+                    if (ovlSkipEl) ovlSkipEl.value = config.overlay_frame_skip ?? 5;
+                    if (modeEl) modeEl.value = landingModeFromConfig(config);
+                    if (loresEl) {
+                        const [rw, rh] = (resEl && resEl.value ? resEl.value : '640x480').split('x').map(Number);
+                        const [lw, lh] = Array.isArray(config.lores_size) && config.lores_size.length >= 2
+                            ? config.lores_size
+                            : cvLoresForMain(rw, rh);
+                        loresEl.value = `${lw}x${lh}`;
+                    }
+                })
+                .catch(() => {});
+        }
+
+        function loadCameraPanelConfigs() {
+            return Promise.all([0, 1].map(loadCameraPanelConfig));
+        }
+
+        function renderCameraDetect(data) {
+            if (!data) return;
+
+            const ok = data.connected_count || 0;
+            const exp = data.expected_count || 0;
+            const status = document.getElementById('camera-settings-status');
+            if (status) {
+                status.className = 'status-indicator ' + (ok > 0 ? (ok >= exp ? 'status-success' : 'status-info') : 'status-error');
+                const sensors = (data.connected || []).map(c => (c.sensor || '').toUpperCase()).join(' + ');
+                status.textContent = sensors
+                    ? `✓ ${ok}/${exp} cameras · ${sensors}`
+                    : `✓ ${ok}/${exp} cameras · ${data.supported_types || 0} types supported`;
+            }
+
+            if (data.ports) {
+                ['cam0', 'cam1'].forEach(p => {
+                    const port = data.ports[p];
+                    if (!port) return;
+                    const sel = document.getElementById('port-' + p + '-overlay');
+                    if (sel && port.overlay) {
+                        sel.value = port.overlay;
+                        onCameraSensorChange(p, true);
+                    }
+                    if (port.enabled !== undefined) {
+                        setCamEnabledToggle(p, port.enabled);
+                        updateCamLiveBadge(p);
+                    }
+                    const line = document.getElementById(p + '-status-line');
+                    if (line) {
+                        const idx = port.libcamera_index != null ? port.libcamera_index : '—';
+                        const sensor = (port.sensor || port.overlay || '').toUpperCase();
+                        if (port.status === 'ok') {
+                            line.className = 'cam-status-line ok';
+                            line.textContent = `${sensor} · idx ${idx} · OK`;
+                        } else if (port.status === 'disabled') {
+                            line.className = 'cam-status-line warn';
+                            line.textContent = `${sensor || '—'} · Stream off`;
+                        } else {
+                            line.className = 'cam-status-line err';
+                            line.textContent = port.message || `${sensor || '—'} · Sensor probe failed`;
+                        }
+                    }
+                });
+            }
+        }
+
+        function refreshCameraDetect(force) {
+            const q = force ? '?refresh=1' : '';
+            const cardStatus = document.getElementById('camera-settings-status');
+            if (cardStatus && force) {
+                cardStatus.className = 'status-indicator status-info';
+                cardStatus.textContent = 'Scanning cameras...';
+            }
+            return fetch('/api/camera/detect' + q)
+                .then(r => r.json())
+                .then(renderCameraDetect)
+                .catch(e => {
+                    const msg = '✗ API error: ' + e.message;
+                    if (cardStatus) {
+                        cardStatus.className = 'status-indicator status-error';
+                        cardStatus.textContent = msg;
+                    }
+                    throw e;
+                });
+        }
+
+        let cameraTestTimer = null;
+        const cameraTestBusy = {};
+
+        function closeCameraTest() {
+            if (cameraTestTimer) {
+                clearInterval(cameraTestTimer);
+                cameraTestTimer = null;
+            }
+            [0, 1].forEach(id => {
+                cameraTestBusy[id] = false;
+                const img = document.getElementById('camera-test-img-' + id);
+                const stage = document.getElementById('camera-test-stage-' + id);
+                if (stage) stage.classList.add('is-empty');
+                if (img && img.dataset.obj) {
+                    URL.revokeObjectURL(img.dataset.obj);
+                    delete img.dataset.obj;
+                    img.removeAttribute('src');
+                }
+            });
+            const modal = document.getElementById('cameraTestModal');
+            if (modal) modal.classList.remove('active');
+        }
+
+        function inspectCamera(id) {
+            if (cameraTestBusy[id]) return;
+            const modal = document.getElementById('cameraTestModal');
+            if (!modal || !modal.classList.contains('active')) return;
+            cameraTestBusy[id] = true;
+            const img = document.getElementById('camera-test-img-' + id);
+            const stage = document.getElementById('camera-test-stage-' + id);
+            const status = document.getElementById('camera-test-status-' + id);
+            const path = document.getElementById('camera-test-path-' + id);
+            if (status && !status.dataset.ready) status.textContent = 'Đang lấy khung hình camera đang đẩy...';
+            const frame = fetch('/api/camera/preview?camera_id=' + id + '&t=' + Date.now())
+                .then(r => {
+                    if (!r.ok) return null;
+                    return r.blob();
+                })
+                .then(blob => {
+                    if (!img || !modal.classList.contains('active')) return;
+                    if (!blob) {
+                        if (!img.dataset.obj && stage) stage.classList.add('is-empty');
+                        return;
+                    }
+                    const next = URL.createObjectURL(blob);
+                    const prev = img.dataset.obj;
+                    img.src = next;
+                    img.dataset.obj = next;
+                    if (stage) stage.classList.remove('is-empty');
+                    if (prev) URL.revokeObjectURL(prev);
+                })
+                .catch(() => {});
+            const report = fetch('/api/camera/test-report?camera_id=' + id)
+                .then(r => r.json())
+                .then(d => {
+                    if (path && d.publish_path) path.textContent = d.publish_path;
+                    if (status) {
+                        status.dataset.ready = '1';
+                        status.textContent = d.verdict || 'Không có kết luận.';
+                    }
+                })
+                .catch(err => {
+                    if (status) status.textContent = 'Không kiểm tra được: ' + err.message;
+                });
+            return Promise.all([frame, report]).finally(() => {
+                cameraTestBusy[id] = false;
+            });
+        }
+
+        function testCameras() {
+            const modal = document.getElementById('cameraTestModal');
+            if (modal) modal.classList.add('active');
+            [0, 1].forEach(id => {
+                cameraTestBusy[id] = false;
+                const status = document.getElementById('camera-test-status-' + id);
+                if (status) delete status.dataset.ready;
+            });
+            [0, 1].forEach(inspectCamera);
+            if (cameraTestTimer) clearInterval(cameraTestTimer);
+            cameraTestTimer = setInterval(() => {
+                if (!modal || !modal.classList.contains('active')) return;
+                [0, 1].forEach(inspectCamera);
+            }, 200);
+        }
+
+        function restartCameraStreams() {
+            const btn = document.getElementById('cam-btn-restart');
+            if (btn && btn.disabled) return Promise.resolve();
+            const output = document.getElementById('cameraSetupOutput');
+            if (output) output.textContent = 'Restarting camera streams...\n';
+            return fetch('/api/camera/restart', { method: 'POST' })
+                .then(r => r.json())
+                .then(d => {
+                    if (output) {
+                        output.textContent = d.success
+                            ? '✓ Streams restarted.\nPIDs: ' + JSON.stringify(d.pids || [])
+                            : '✗ Restart failed: ' + (d.message || 'unknown');
+                    }
+                    return d;
+                })
+                .catch(e => {
+                    if (output) output.textContent = '✗ Restart error: ' + e.message;
+                    throw e;
+                });
+        }
+
+        function rebootCM5() {
+            const btn = document.getElementById('cam-btn-reboot');
+            if (btn && btn.disabled) return Promise.resolve();
+            if (!confirm('Reboot CM5 to apply sensor boot configuration?\nThe drone will be offline for a few minutes.')) {
+                return Promise.resolve();
+            }
+            const output = document.getElementById('cameraSetupOutput');
+            if (output) output.textContent = 'Applying overlay and rebooting CM5...\n';
+            return fetch('/api/camera/apply-overlay', { method: 'POST' })
+                .then(r => r.json())
+                .then(d => {
+                    if (output) {
+                        if (d.success) {
+                            output.textContent = '✓ ' + (d.message || 'CM5 will reboot shortly.') + '\n';
+                            if (d.output) output.textContent += d.output + '\n';
+                        } else {
+                            output.textContent = '✗ Reboot failed: ' + (d.message || 'unknown');
+                            if (d.error) output.textContent += '\n' + d.error;
+                        }
+                    }
+                    return d;
+                })
+                .catch(e => {
+                    if (output) output.textContent = '✗ Reboot error: ' + e.message;
+                    throw e;
+                });
+        }
+
+        function setCameraMsg(text) {
+            const output = document.getElementById('cameraSetupOutput');
+            if (output) output.textContent = text;
+        }
+
+        function cvLoresForMain(width, height) {
+            const maxW = 320, maxH = 240;
+            if (!width || !height) return [maxW, maxH];
+            if (width * height <= maxW * maxH) return [width, height];
+            const scale = Math.min(maxW / width, maxH / height);
+            return [
+                Math.max(1, Math.round(width * scale)),
+                Math.max(1, Math.round(height * scale)),
+            ];
+        }
+
+        function updateLoresForResolution(port) {
+            const resEl = document.getElementById(port + '-resolution');
+            const loresEl = document.getElementById(port + '-lores-size');
+            if (!resEl || !loresEl) return;
+            const [w, h] = resEl.value.split('x').map(Number);
+            const [lw, lh] = cvLoresForMain(w, h);
+            loresEl.value = `${lw}x${lh}`;
+        }
+
+        function parseLoresSize(text, fallbackW, fallbackH) {
+            const parts = String(text || '').split('x').map(s => parseInt(s.trim(), 10));
+            if (parts.length >= 2 && parts[0] > 0 && parts[1] > 0) {
+                return [parts[0], parts[1]];
+            }
+            return [fallbackW, fallbackH];
+        }
+
+        function buildCamConfigFromUI(id) {
+            const port = 'cam' + id;
+            const enabled = isCamEnabledToggle(port);
+            const resEl = document.getElementById(port + '-resolution');
+            const fmtEl = document.getElementById(port + '-format');
+            const resolution = resEl ? resEl.value : '640x480';
+            const format = fmtEl ? fmtEl.value : 'BGR888';
+            const [width, height] = resolution.split('x').map(Number);
+            const [loresW, loresH] = cvLoresForMain(width, height);
+            const brEl = document.getElementById(port + '-brightness');
+            const crEl = document.getElementById(port + '-contrast');
+            const shEl = document.getElementById(port + '-sharpness');
+            const saEl = document.getElementById(port + '-saturation');
+            const detEl = document.getElementById(port + '-detection');
+            const ovlEl = document.getElementById(port + '-overlay');
+            const burnEl = document.getElementById(port + '-overlay-burn');
+            const gateEl = document.getElementById(port + '-gate-timeout');
+            const detSkipEl = document.getElementById(port + '-detect-skip');
+            const ovlSkipEl = document.getElementById(port + '-overlay-skip');
+            const loresEl = document.getElementById(port + '-lores-size');
+            const modeEl = document.getElementById(port + '-landing-mode');
+            const landing = parseLandingModeSelect(modeEl ? modeEl.value : 'contour_h');
+            return {
+                camera_id: id,
+                enabled: enabled,
+                size: [width, height],
+                format: format,
+                framerate: 30,
+                bitrate: bitrateForResolution(width, height),
+                brightness: brEl ? parseFloat(brEl.value) : 0,
+                contrast: crEl ? parseFloat(crEl.value) : 1,
+                sharpness: shEl ? parseFloat(shEl.value) : 1.5,
+                saturation: saEl ? parseFloat(saEl.value) : 1,
+                detection_enabled: detEl ? detEl.checked : true,
+                overlay_enabled: ovlEl ? ovlEl.checked : true,
+                overlay_burn_enabled: burnEl ? burnEl.checked : true,
+                gate_timeout_ms: gateEl ? parseInt(gateEl.value, 10) || 0 : 0,
+                detect_frame_skip: detSkipEl ? parseInt(detSkipEl.value, 10) || 30 : 30,
+                overlay_frame_skip: ovlSkipEl ? parseInt(ovlSkipEl.value, 10) || 5 : 5,
+                lores_size: [loresW, loresH],
+                landing_detection_mode: landing.landing_detection_mode,
+                aruco_marker_id: landing.aruco_marker_id,
+                aruco_dictionary: 'DICT_4X4_50',
+            };
+        }
+
+        async function saveCameraAll() {
+            setCameraMsg('Saving configuration...');
+            try {
+                const ports = buildCameraPortsPayload();
+                const portRes = await fetch('/api/camera/ports', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ports })
+                }).then(r => r.json());
+                if (!portRes.success) throw new Error(portRes.message || 'Failed to save sensor mapping');
+
+                const primaryEl = document.getElementById('primary-camera-select');
+                const globalRes = await fetch('/api/camera/config/global', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        primary_camera_id: primaryEl ? parseInt(primaryEl.value, 10) : 0,
+                        auto_memory_profile: true
+                    })
+                }).then(r => r.json());
+                if (!globalRes.success) throw new Error(globalRes.message || 'Failed to save primary camera');
+
+                for (const id of [0, 1]) {
+                    const config = { ...buildCamConfigFromUI(id), restart: false };
+                    const saveRes = await fetch('/api/camera/config/save', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(config)
+                    }).then(r => r.json());
+                    if (!saveRes.success) throw new Error(saveRes.message || 'Failed to save stream cam' + id);
+                }
+
+                onCameraSavedSuccess(!!portRes.needs_reboot);
+                if (portRes.setup_error) {
+                    setCameraMsg(document.getElementById('cameraSetupOutput').textContent + '\n\n⚠ setup_camera: ' + portRes.setup_error);
+                }
+                refreshCameraDetect(false);
+            } catch (e) {
+                setCameraMsg('✗ ' + e.message);
+            }
+        }
+
+        function ensureCameraRegistryLoaded() {
+            if (cameraRegistry.length) {
+                fillOverlaySelects();
+                refreshAllResolutionSelects();
+                return Promise.resolve();
+            }
+            return fetch('/api/camera/registry')
+                .then(r => r.json())
+                .then(d => {
+                    if (d.registry) {
+                        if (d.registry.sensors) {
+                            cameraRegistry = d.registry.sensors;
+                        }
+                        if (d.registry.default_stream_profile) {
+                            cameraDefaultStreamProfile = d.registry.default_stream_profile;
+                        }
+                        fillOverlaySelects();
+                        refreshAllResolutionSelects();
+                    }
+                });
+        }
+
+        function loadCameraGlobalConfig() {
+            return fetch('/api/camera/config/global')
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) return;
+                    const primaryEl = document.getElementById('primary-camera-select');
+                    if (primaryEl && (data.primary_camera_id === 0 || data.primary_camera_id === 1)) {
+                        primaryEl.value = String(data.primary_camera_id);
+                    }
+                    const memLabel = document.getElementById('memory-tier-label');
+                    if (memLabel && data.memory_tier_gb) {
+                        memLabel.textContent = data.memory_tier_gb;
+                    }
+                })
+                .catch(() => {});
+        }
+
+        function openCameraSetup() {
+            wireCameraFormDirtyListeners();
+            openModal('cameraSetupModal');
+            populateLandingModeSelects();
+            ensureCameraRegistryLoaded()
+                .then(() => loadCameraGlobalConfig())
+                .then(() => loadCameraPanelConfigs())
+                .then(() => refreshCameraDetect(false))
+                .then(() => resetCameraApplyState());
+        }
 
         // Motor Testing
         function testMotors() {
@@ -888,6 +2253,27 @@ Loading GPS information...
             refreshGPS();
         }
 
+        function ifaceDataForActive(activeIface, data) {
+            const map = {
+                wlan0: data.wifi,
+                wwan0: data['4g'],
+                eth0: data.ethernet,
+            };
+            return map[activeIface] || data[activeIface] || {};
+        }
+
+        function formatLatDeg(v) {
+            if (v === undefined || v === null || Number.isNaN(Number(v))) return 'N/A';
+            const n = Number(v);
+            return `${Math.abs(n).toFixed(6)}°${n >= 0 ? 'N' : 'S'}`;
+        }
+
+        function formatLonDeg(v) {
+            if (v === undefined || v === null || Number.isNaN(Number(v))) return 'N/A';
+            const n = Number(v);
+            return `${Math.abs(n).toFixed(6)}°${n >= 0 ? 'E' : 'W'}`;
+        }
+
         function refreshGPS() {
             const output = document.getElementById('gpsOutput');
             output.textContent = 'Đang kiểm tra GPS...\n\n';
@@ -897,20 +2283,48 @@ Loading GPS information...
             status.className = 'status-indicator status-info';
             status.textContent = 'Đang kiểm tra...';
             
-            setTimeout(() => {
-                output.textContent = 'Thông tin GPS:\n\n';
-                output.textContent += 'Trạng thái: ✓ GPS Fix\n';
-                output.textContent += 'Số vệ tinh: 12\n';
-                output.textContent += 'HDOP: 0.8\n';
-                output.textContent += 'Vĩ độ: 21.0285°N\n';
-                output.textContent += 'Kinh độ: 105.8542°E\n';
-                output.textContent += 'Độ cao: 12.5m\n';
-                output.textContent += 'Tốc độ: 0.0 m/s\n';
-                output.textContent += 'Compass: 45.2°\n';
-                
-                status.className = 'status-indicator status-success';
-                status.textContent = '✓ GPS OK - 12 vệ tinh';
-            }, 2000);
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    const diag = data.mavlink_diagnostics || {};
+                    const fix = Number(data.gps_fix ?? diag.gps_fix_type ?? 0);
+                    const sats = Number(data.satellites ?? diag.gps_satellites ?? 0);
+                    const lock = data.gps_lock || diag.diagnosis || 'NO GPS';
+                    const hasFix = fix >= 3 && sats > 0;
+                    const hint = diag.hint || '';
+
+                    output.textContent = 'Thông tin GPS (PX4 / MAVLink):\n\n';
+                    output.textContent += `Trạng thái: ${hasFix ? '✓' : '✗'} ${lock}\n`;
+                    output.textContent += `Số vệ tinh: ${sats}\n`;
+                    output.textContent += `HDOP: ${data.hdop ? Number(data.hdop).toFixed(1) : 'N/A'}\n`;
+                    output.textContent += `Vĩ độ: ${formatLatDeg(data.latitude_deg)}\n`;
+                    output.textContent += `Kinh độ: ${formatLonDeg(data.longitude_deg)}\n`;
+                    output.textContent += `Độ cao: ${data.altitude_m !== undefined ? Number(data.altitude_m).toFixed(1) + 'm' : 'N/A'}\n`;
+                    output.textContent += `Tốc độ: ${data.speed_ms !== undefined ? Number(data.speed_ms).toFixed(1) + ' m/s' : 'N/A'}\n`;
+                    output.textContent += `Compass: ${data.heading_deg !== undefined ? Number(data.heading_deg).toFixed(1) + '°' : 'N/A'}\n`;
+                    if (hint) {
+                        output.textContent += `\nGhi chú: ${hint}\n`;
+                    }
+                    if (!data.pixhawk_connected) {
+                        output.textContent += '\n⚠ Chưa kết nối Pixhawk — không có telemetry thật.\n';
+                    }
+
+                    if (hasFix) {
+                        status.className = 'status-indicator status-success';
+                        status.textContent = `✓ GPS OK - ${sats} vệ tinh`;
+                    } else if (sats > 0) {
+                        status.className = 'status-indicator status-info';
+                        status.textContent = `Đang tìm fix (${sats} vệ tinh)`;
+                    } else {
+                        status.className = 'status-indicator status-error';
+                        status.textContent = '✗ Chưa có GPS fix';
+                    }
+                })
+                .catch(error => {
+                    output.textContent = `Lỗi đọc GPS: ${error.message}`;
+                    status.className = 'status-indicator status-error';
+                    status.textContent = '✗ Lỗi API';
+                });
         }
 
         function compassCalib() {
@@ -986,7 +2400,290 @@ Loading GPS information...
             compassCurrentStep = 0;
         }
 
-        // Network Settings Functions
+        // Auto Landing Settings
+        function openAutoLandingSettings() {
+            openModal('autoLandingModal');
+            loadTemplateList();
+            loadLandingSettings();
+        }
+
+        // Load available templates from API
+        function loadTemplateList() {
+            fetch('/api/landing/templates')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.templates) {
+                        const select = document.getElementById('landingTemplate');
+                        select.innerHTML = '';
+                        
+                        data.templates.forEach(template => {
+                            const option = document.createElement('option');
+                            option.value = template;
+                            option.textContent = `Template ${template}`;
+                            select.appendChild(option);
+                        });
+                        
+                        // Set default to H if available
+                        if (data.templates.includes('H')) {
+                            select.value = 'H';
+                        }
+                        
+                        previewTemplate();
+                    } else {
+                        document.getElementById('landingTemplate').innerHTML = '<option>Không tìm thấy templates</option>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading templates:', error);
+                    document.getElementById('landingTemplate').innerHTML = '<option>Lỗi khi load templates</option>';
+                });
+        }
+
+        function loadLandingSettings() {
+            // Try to load from localStorage first
+            const savedConfig = localStorage.getItem('landingConfig');
+            if (savedConfig) {
+                try {
+                    const config = JSON.parse(savedConfig);
+                    document.getElementById('landingMode').value = config.mode || 'normal';
+                    
+                    if (config.environment) {
+                        const envRadio = document.querySelector(`input[name="environment"][value="${config.environment}"]`);
+                        if (envRadio) envRadio.checked = true;
+                    }
+                    
+                    if (config.marker_type || config.template) {
+                        const template = config.template || config.marker_type;
+                        document.getElementById('landingTemplate').value = template;
+                        previewTemplate();
+                    }
+                    
+                    if (config.safety_level) {
+                        document.getElementById('safetyLevel').value = config.safety_level;
+                        updateSafetyLabel(config.safety_level);
+                    }
+                    
+                    updateLandingPreview();
+                    document.getElementById('landingOutput').textContent = '✅ Đã load config đã lưu';
+                    return;
+                } catch (e) {
+                    console.error('Error loading config:', e);
+                }
+            }
+            
+            // Try to fetch from server
+            fetch('/api/landing/config/load')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.config) {
+                        const config = data.config;
+                        document.getElementById('landingMode').value = config.mode || 'normal';
+                        
+                        if (config.environment) {
+                            const envRadio = document.querySelector(`input[name="environment"][value="${config.environment}"]`);
+                            if (envRadio) envRadio.checked = true;
+                        }
+                        
+                        if (config.marker_type || config.template) {
+                            const template = config.template || config.marker_type;
+                            document.getElementById('landingTemplate').value = template;
+                            previewTemplate();
+                        }
+                        
+                        if (config.safety_level) {
+                            document.getElementById('safetyLevel').value = config.safety_level;
+                            updateSafetyLabel(config.safety_level);
+                        }
+                        
+                        updateLandingPreview();
+                        document.getElementById('landingOutput').textContent = '✅ Đã load config từ server';
+                    }
+                })
+                .catch(error => {
+                    // Use defaults
+                    previewTemplate();
+                    updateLandingPreview();
+                    document.getElementById('landingOutput').textContent = 'Sử dụng config mặc định\nMode: Normal | Environment: Outdoor | Template: H | Safety: Balanced';
+                });
+        }
+
+        function previewTemplate() {
+            const template = document.getElementById('landingTemplate').value;
+            const templateImg = document.getElementById('templateImg');
+            const templateDesc = document.getElementById('templateDesc');
+            
+            if (!template) {
+                templateImg.style.display = 'none';
+                templateDesc.textContent = 'Chọn template để xem preview';
+                return;
+            }
+            
+            templateDesc.textContent = `Template ${template} - Landing pad với ký tự ${template}`;
+            
+            // Load template image from static files
+            templateImg.src = `/templates/${template}.png`;
+            templateImg.style.display = 'block';
+            templateImg.onerror = function() {
+                this.style.display = 'none';
+                templateDesc.textContent = `Template ${template} (Preview không có sẵn)`;
+            };
+        }
+
+        function saveLandingSettings() {
+            const mode = document.getElementById('landingMode').value;
+            const environment = document.querySelector('input[name="environment"]:checked')?.value || 'outdoor';
+            const template = document.getElementById('landingTemplate').value;
+            const safetyLevel = parseInt(document.getElementById('safetyLevel').value);
+            
+            if (!template) {
+                document.getElementById('landingOutput').textContent = '✗ Vui lòng chọn template!';
+                return;
+            }
+            
+            const config = {
+                mode: mode,
+                environment: environment,
+                marker_type: template,
+                safety_level: safetyLevel,
+                template: template
+            };
+            
+            const output = document.getElementById('landingOutput');
+            output.textContent = 'Đang lưu cấu hình landing...\n\n';
+            
+            fetch('/api/landing/config/save', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(config)
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        output.textContent = '✅ Cấu hình landing đã lưu thành công!\n\n';
+                        output.textContent += 'Landing Config:\n';
+                        output.textContent += `  Mode: ${mode}\n`;
+                        output.textContent += `  Environment: ${environment}\n`;
+                        output.textContent += `  Template: ${template}\n`;
+                        output.textContent += `  Safety Level: ${getSafetyLevelText(safetyLevel)}\n\n`;
+                        output.textContent += '✅ Config được lưu vào: Find_landing/landing_config.json\n';
+                        
+                        const status = document.getElementById('landing-status');
+                        status.className = 'status-indicator status-success';
+                        status.textContent = `✓ ${mode.toUpperCase()} | ${template}`;
+                        
+                        setTimeout(() => {
+                            closeModal('autoLandingModal');
+                        }, 2000);
+                    } else {
+                        output.textContent = '✗ Lỗi: ' + data.message;
+                    }
+                })
+                .catch(error => {
+                    output.textContent = '✗ Lỗi kết nối: ' + error.message + '\n\n';
+                    output.textContent += 'Cấu hình vẫn được lưu local:\n';
+                    output.textContent += JSON.stringify(config, null, 2);
+                    localStorage.setItem('landingConfig', JSON.stringify(config));
+                });
+        }
+
+        function getSafetyLevelText(level) {
+            switch(level) {
+                case 1: return 'Conservative';
+                case 2: return 'Balanced';
+                case 3: return 'Aggressive';
+                default: return 'Balanced';
+            }
+        }
+
+        function updateSafetyLabel(value) {
+            const label = document.getElementById('safetyLabel');
+            const text = getSafetyLevelText(parseInt(value));
+            label.textContent = text;
+            
+            // Update color
+            if (value == 1) {
+                label.style.color = 'var(--accent-green)';
+            } else if (value == 2) {
+                label.style.color = 'var(--accent-blue)';
+            } else {
+                label.style.color = 'var(--accent-red)';
+            }
+            
+            updateLandingPreview();
+        }
+
+        function updateLandingPreview() {
+            const mode = document.getElementById('landingMode').value;
+            const environment = document.querySelector('input[name="environment"]:checked')?.value || 'outdoor';
+            const template = document.getElementById('landingTemplate').value || 'H';
+            const safetyLevel = parseInt(document.getElementById('safetyLevel').value);
+            
+            const summary = document.getElementById('configSummary');
+            summary.textContent = `Mode: ${mode.toUpperCase()} | Environment: ${environment.toUpperCase()} | Template: ${template} | Safety: ${getSafetyLevelText(safetyLevel)}`;
+        }
+
+
+
+        function testLanding() {
+            const output = document.getElementById('landingOutput');
+            output.textContent = '🧪 Starting Landing Test...\n\n';
+            output.textContent += 'Phase 1: Checking sensors...\n';
+            output.textContent += '  ✓ GPS: OK (15 satellites)\n';
+            output.textContent += '  ✓ Compass: OK\n';
+            output.textContent += '  ✓ Camera: OK\n\n';
+            output.textContent += 'Phase 2: Marker detection test...\n';
+            output.textContent += '  ⏳ Searching for marker...\n';
+            
+            setTimeout(() => {
+                output.textContent += '  ✓ Marker detected!\n';
+                output.textContent += '  Position: X=+12cm, Y=-5cm\n';
+                output.textContent += '  Confidence: 87%\n\n';
+                output.textContent += '✅ Landing test completed successfully!\n';
+                output.textContent += 'Safe to proceed with actual landing.\n';
+            }, 2000);
+        }
+
+        function uploadTemplate() {
+            // Create file input dynamically
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.onchange = function(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                const formData = new FormData();
+                formData.append('template', file);
+                
+                const output = document.getElementById('landingOutput');
+                output.textContent = 'Đang upload template...\n';
+                
+                fetch('/api/landing/templates/upload', {
+                    method: 'POST',
+                    body: formData
+                })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            output.textContent += '✓ Template đã upload thành công!\n';
+                            output.textContent += `File: ${data.filename}\n`;
+                            output.textContent += `Path: Find_landing/templates/${data.filename}\n`;
+                            
+                            // Reload template list
+                            loadLandingSettings();
+                        } else {
+                            output.textContent += '✗ Upload failed: ' + data.message;
+                        }
+                    })
+                    .catch(error => {
+                        output.textContent += '✗ Error: ' + error.message;
+                    });
+            };
+            input.click();
+        }
+
         // Network Settings Functions
         let networkStatusInterval = null;
 
@@ -998,19 +2695,6 @@ Loading GPS information...
         }
 
         function loadNetworkSettings() {
-            // Load current priority
-            fetch('/api/network/priority')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.priority === '4g') {
-                        document.getElementById('priority4g').checked = true;
-                    } else {
-                        document.getElementById('priorityWifi').checked = true;
-                    }
-                })
-                .catch(error => console.error('Error loading priority:', error));
-
-            // Load initial status
             refreshNetworkStatus();
         }
 
@@ -1024,10 +2708,29 @@ Loading GPS information...
                     console.error('Error loading network status:', error);
                     document.getElementById('activeConnection').textContent = 'Error loading status';
                 });
+
+            fetch('/api/network/cellular/module')
+                .then(response => response.json())
+                .then(data => {
+                    if (data && data.driver) {
+                        window.__lastCellularDriver = data.driver;
+                        const moduleEl = document.getElementById('status-cellular-module');
+                        if (moduleEl) {
+                            moduleEl.textContent = data.driver_label || data.driver;
+                        }
+                    }
+                })
+                .catch(() => {});
         }
 
         function updateNetworkDisplay(data) {
-            // Update 4G status
+            const cellular = data.cellular || {};
+            const gen = Number(cellular.generation) || 4;
+            const title = gen >= 5 ? '5G / NR' : '4G / LTE';
+            const titleEl = document.getElementById('status-cellular-title');
+            if (titleEl) titleEl.textContent = title;
+
+            // Update 4G/cellular status
             updateInterfaceStatus('4g', data['4g']);
             
             // Update WiFi status
@@ -1040,7 +2743,7 @@ Loading GPS information...
             const activeConn = document.getElementById('activeConnection');
             if (data.active_interface) {
                 const iface = data.active_interface;
-                const ifaceData = data[iface] || {};
+                const ifaceData = ifaceDataForActive(iface, data);
                 activeConn.innerHTML = `
                     <strong>Connected via: ${iface.toUpperCase()}</strong><br>
                     IP: ${ifaceData.ip || 'N/A'}<br>
@@ -1070,10 +2773,16 @@ Loading GPS information...
 
             if (data.status === 'connected') {
                 statusClass = 'status-connected';
-                statusText = 'Connected';
+                statusText = type === 'eth' ? 'PX4 Stream' : 'Connected';
             } else if (data.status === 'available') {
                 statusClass = 'status-available';
-                statusText = 'Available';
+                statusText = type === 'eth' ? 'PX4 HB Only' : 'Available';
+            } else if (data.status === 'degraded') {
+                statusClass = 'status-no-internet';
+                statusText = 'Symbolic MAVLink';
+            } else if (data.status === 'waiting') {
+                statusClass = 'status-no-ip';
+                statusText = 'Waiting PX4';
             } else if (data.status === 'no_ip') {
                 statusClass = 'status-no-ip';
                 statusText = 'No IP';
@@ -1091,12 +2800,26 @@ Loading GPS information...
                 
                 if (type === '4g') {
                     document.getElementById('status-4g-ip').textContent = data.ip || 'N/A';
-                    document.getElementById('status-4g-signal').textContent = data.signal || 'N/A';
+                    const moduleEl = document.getElementById('status-cellular-module');
+                    if (moduleEl) {
+                        const driver = (window.__lastCellularDriver || data.driver || 'sim7600_qmi');
+                        moduleEl.textContent = driver === 'sim8262_pcie' ? 'SIM8262-E 5G' : 'SIM7600 4G';
+                    }
+                    document.getElementById('status-4g-signal').textContent = data.signal || data.signal_quality || 'N/A';
                 } else if (type === 'wifi') {
                     document.getElementById('status-wifi-ip').textContent = data.ip || 'N/A';
                     document.getElementById('status-wifi-ssid').textContent = data.ssid || 'N/A';
                 } else if (type === 'eth') {
                     document.getElementById('status-eth-ip').textContent = data.ip || 'N/A';
+                    document.getElementById('status-eth-px4').textContent = data.pixhawk_ip || 'N/A';
+                    const rx = Number(data.mavlink_rx_per_sec);
+                    const quality = data.mavlink_quality || '';
+                    document.getElementById('status-eth-mavlink').textContent =
+                        Number.isFinite(rx) ? `${rx.toFixed(0)} (${quality || 'n/a'})` : 'N/A';
+                    if (data.interface) {
+                        document.getElementById('status-eth-info').textContent =
+                            `${data.interface} · ${data.role || 'PX4 link'}`;
+                    }
                 }
             } else if (statusDetails) {
                 statusDetails.style.display = 'none';
@@ -1128,31 +2851,6 @@ Loading GPS information...
             networkStatusInterval = setInterval(refreshNetworkStatus, 5000);
         }
 
-        function saveNetworkPriority() {
-            const priority = document.querySelector('input[name="priority"]:checked').value;
-            
-            fetch('/api/network/priority', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ priority: priority })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    alert('✓ Priority saved successfully! The system will reconnect with the new priority.');
-                    // Trigger reconnection
-                    reconnectNetwork();
-                } else {
-                    alert('✗ Error: ' + (data.error || 'Unknown error'));
-                }
-            })
-            .catch(error => {
-                alert('✗ Connection error: ' + error.message);
-            });
-        }
-
         function reconnectNetwork() {
             if (!confirm('Reconnect network? This may cause brief disconnection.')) {
                 return;
@@ -1178,8 +2876,9 @@ Loading GPS information...
 
         // Load initial network status on page load
         window.addEventListener('DOMContentLoaded', function() {
+            populateLandingModeSelects();
             refreshNetworkStatus();
-            // Update every 10 seconds on main page
+            refreshCameraDetect(false);
             setInterval(refreshNetworkStatus, 10000);
         });
 

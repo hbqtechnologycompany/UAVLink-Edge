@@ -1,0 +1,7 @@
+[Unit]
+Description=Drone Stack — 4G + DroneBridge (Go)
+Wants=dronebridge-eth-setup.service dronebridge-camera-setup.service dronebridge-lcd-i2c-setup.service dronebridge-4g-init.service dronebridge-netmon.service dronebridge.service dronebridge-lcd-monitor.service
+After=network-online.target dronebridge-eth-setup.service dronebridge-camera-setup.service dronebridge-lcd-i2c-setup.service
+
+[Install]
+WantedBy=multi-user.target

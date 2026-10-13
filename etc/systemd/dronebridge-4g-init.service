@@ -1,0 +1,25 @@
+# Đặt tại: /etc/systemd/system/dronebridge-4g-init.service
+[Unit]
+Description=DroneBridge Cellular Modem Initialization
+After=network-pre.target dronebridge-lcd-i2c-setup.service
+Before=dronebridge-netmon.service dronebridge.service
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 -u /opt/dronebridge/Module_Cellular/modem_init.py
+ExecStartPost=/usr/bin/python3 -u /opt/dronebridge/Module_4G/connection_manager.py once
+
+# Thời gian tối đa: 3 phút cho 6 bước init
+TimeoutStartSec=180
+
+# Không restart — nếu fail thì netmon sẽ retry
+Restart=no
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dronebridge-4g
+
+[Install]
+WantedBy=multi-user.target

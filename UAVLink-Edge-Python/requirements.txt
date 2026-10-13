@@ -1,5 +1,0 @@
-pymavlink
-pyyaml
-flask
-requests
-psutil
