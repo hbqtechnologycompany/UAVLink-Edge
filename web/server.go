@@ -640,7 +640,18 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 			snap["mavlink_diagnostics"] = diag
 		}
 		mergeNetworkIntoSnapshot(snap)
+		snap["host"] = hostThermalStatus()
 		json.NewEncoder(w).Encode(snap)
+	})
+
+	http.HandleFunc("/api/preflight", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		json.NewEncoder(w).Encode(BuildPreflightReport())
 	})
 
 	// API endpoint for connection status
@@ -807,6 +818,45 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "*")
 	}
+
+	// GET /api/v1/drone/session — live auth session from registration.
+	// An API key is a separate object; this stays visible when no key exists.
+	http.HandleFunc("/api/v1/drone/session", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		setCORSHeaders(w)
+		if r.Method == http.MethodOptions {
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if authClient == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"authenticated": false,
+				"error":         "Auth client not initialized",
+			})
+			return
+		}
+		token, localIP, expires := authClient.GetSessionInfo()
+		snap := metrics.Global.GetSnapshot()
+		status, _ := snap["auth_status"].(string)
+		authenticated := token != "" && !expires.IsZero() && time.Now().Before(expires)
+		var expiresOut interface{}
+		if !expires.IsZero() {
+			expiresOut = expires.Format(time.RFC3339)
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"authenticated": authenticated,
+			"status":        status,
+			"token":         token,
+			"expires_at":    expiresOut,
+			"local_ip":      localIP,
+			"drone_uuid":    droneUUID,
+		})
+	})
 
 	// API Key Management Endpoints (compatible with HBQCONNECT format)
 	// GET /api/v1/drone/api-key/status - Get current API key status

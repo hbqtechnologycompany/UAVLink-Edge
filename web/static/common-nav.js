@@ -17,7 +17,7 @@
     var themeParam = new URLSearchParams(window.location.search).get('shellTheme');
     if (themeParam) applyShellTheme(themeParam);
 
-    var scrollPages = ['mavlink.html', 'connect.html', 'mavlink_settings.html', 'settings.html'];
+    var scrollPages = ['mavlink.html', 'connect.html', 'mavlink_settings.html', 'settings.html', 'tokens.html', 'preflight.html'];
     var page = window.location.pathname.split('/').pop() || '';
     if (scrollPages.some(function (p) { return page.indexOf(p.replace('.html', '')) >= 0; })) {
         document.documentElement.classList.add('db-scroll');

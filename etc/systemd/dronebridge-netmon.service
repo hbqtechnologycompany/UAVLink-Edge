@@ -1,9 +1,9 @@
 # Đặt tại: /etc/systemd/system/dronebridge-netmon.service
 [Unit]
 Description=DroneBridge Network Monitor & PBR Routing Policy
-After=dronebridge-4g-init.service network.target
-# Wants thay vì Requires: cho phép netmon chạy kể cả khi 4G init fail
-# (sẽ fallback WiFi và retry reinit nội bộ)
+After=network.target
+# Kéo modem init song song. Không After=4g-init: oneshot đó có thể chờ tới 180s
+# khi chưa có sóng, và không được chặn vòng PBR hay web.
 Wants=dronebridge-4g-init.service
 
 [Service]
@@ -15,8 +15,8 @@ ExecStartPre=/usr/bin/python3 /opt/dronebridge/Module_4G/connection_manager.py o
 
 ExecStart=/usr/bin/python3 /opt/dronebridge/Module_4G/connection_manager.py
 
-# Tránh timeout khi 4g-init đang reinit modem (có thể >90s)
-TimeoutStartSec=300
+# Chỉ setup_pbr + một lần áp route. Modem không nằm trên đường start này.
+TimeoutStartSec=60
 
 # Restart nếu crash — routing policy phải luôn chạy
 Restart=always

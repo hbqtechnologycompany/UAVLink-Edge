@@ -26,6 +26,7 @@
             },
             nav: {
                 mavlink: 'MAVLink Monitor',
+                preflight: 'Điều kiện cất cánh',
                 params: 'Tham số PX4',
                 'mavlink-conn': 'MAVLink / Pixhawk',
                 network: 'Server & Mạng',
@@ -47,20 +48,23 @@
             },
             status: {
                 system: 'Hệ thống', px4: 'PX4', auth: 'Xác thực',
-                network: 'Mạng', mavlink: 'MAVLink', ip: 'IP', uptime: 'Uptime'
+                network: 'Mạng', mavlink: 'MAVLink', ip: 'IP', uptime: 'Uptime',
+                cm5: 'CM5', fan: 'Quạt'
             },
             power: {
                 reboot: 'Reboot', off: 'Tắt nguồn',
                 password: 'Mật khẩu hệ thống', cancel: 'Hủy', confirm: 'Xác nhận',
                 rebootTitle: 'Khởi động lại CM5',
-                rebootDesc: 'Máy sẽ reboot. Nhập mật khẩu hệ thống, mật khẩu không được lưu.',
+                rebootDesc: 'Máy sẽ reboot. Chỉ nhập mật khẩu hệ thống một lần, mật khẩu không được lưu.',
                 offTitle: 'Tắt nguồn CM5',
-                offDesc: 'Máy sẽ tắt. Nhập mật khẩu hệ thống, mật khẩu không được lưu.'
+                offDesc: 'Máy sẽ tắt. Chỉ nhập mật khẩu hệ thống một lần, mật khẩu không được lưu.'
             },
             val: {
                 online: 'Online', offline: 'Offline', idle: 'Idle',
                 heartbeat: 'Heartbeat', connected: 'Connected',
-                unknown: 'Unknown', reconnecting: 'Reconnecting...'
+                unknown: 'Unknown', reconnecting: 'Reconnecting...',
+                fanMax: 'TỐI ĐA', fanStopped: 'không quay', underVolt: 'sụt áp',
+                throttling: 'hạ xung', tempTip: 'Nhiệt độ CPU', fanTip: 'Mức quạt'
             },
             themes: {
                 light: 'Sáng', sky: 'Xanh trời', sand: 'Ấm áp',
@@ -76,7 +80,7 @@
                 device: 'Device', security: 'Security', system: 'System'
             },
             nav: {
-                mavlink: 'MAVLink Monitor', params: 'PX4 Parameters',
+                mavlink: 'MAVLink Monitor', preflight: 'Takeoff checks', params: 'PX4 Parameters',
                 'mavlink-conn': 'MAVLink / Pixhawk', network: 'Server & Network',
                 hardware: 'Hardware Setup', tokens: 'Tokens & Sessions',
                 settings: 'Settings'
@@ -93,20 +97,23 @@
             },
             status: {
                 system: 'System', px4: 'PX4', auth: 'Auth',
-                network: 'Network', mavlink: 'MAVLink', ip: 'IP', uptime: 'Uptime'
+                network: 'Network', mavlink: 'MAVLink', ip: 'IP', uptime: 'Uptime',
+                cm5: 'CM5', fan: 'Fan'
             },
             power: {
                 reboot: 'Reboot', off: 'Power off',
                 password: 'System password', cancel: 'Cancel', confirm: 'Confirm',
                 rebootTitle: 'Reboot CM5',
-                rebootDesc: 'The board will reboot. Enter the system password. It is not stored.',
+                rebootDesc: 'The board will reboot. Enter the system password once. It is not stored.',
                 offTitle: 'Power off CM5',
-                offDesc: 'The board will power off. Enter the system password. It is not stored.'
+                offDesc: 'The board will power off. Enter the system password once. It is not stored.'
             },
             val: {
                 online: 'Online', offline: 'Offline', idle: 'Idle',
                 heartbeat: 'Heartbeat', connected: 'Connected',
-                unknown: 'Unknown', reconnecting: 'Reconnecting...'
+                unknown: 'Unknown', reconnecting: 'Reconnecting...',
+                fanMax: 'MAX', fanStopped: 'not spinning', underVolt: 'low power',
+                throttling: 'throttled', tempTip: 'CPU temperature', fanTip: 'Fan level'
             },
             themes: {
                 light: 'Light', sky: 'Sky', sand: 'Warm',
@@ -117,7 +124,8 @@
 
     var NAV_STRUCTURE = [
         { sectionKey: 'monitor', items: [
-            { id: 'mavlink', icon: 'radio', src: 'mavlink.html' }
+            { id: 'mavlink', icon: 'radio', src: 'mavlink.html' },
+            { id: 'preflight', icon: 'preflight', src: 'preflight.html?v=3d4' }
         ]},
         { sectionKey: 'control', items: [
             { id: 'params', icon: 'sliders', src: 'params.html' }
@@ -130,7 +138,7 @@
             { id: 'hardware', icon: 'cpu', src: 'settings.html?v=camcm5-2' }
         ]},
         { sectionKey: 'security', items: [
-            { id: 'tokens', icon: 'shield', src: 'tokens.html' }
+            { id: 'tokens', icon: 'shield', src: 'tokens.html?v=layout1' }
         ]},
         { sectionKey: 'system', items: [
             { id: 'settings', icon: 'settings', panel: 'settings' }
@@ -142,6 +150,7 @@
 
     var ICONS = {
         radio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>',
+        preflight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/><path d="M4 19h16"/></svg>',
         sliders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>',
         plug: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg>',
         wifi: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>',
@@ -357,6 +366,40 @@
         setPill('pill-uptime', data.uptime ? data.uptime.split('.')[0] : 'N/A', '');
         var msgRate = Number(data.mavlink_uplink_msg_per_sec || data.udp_msg_per_sec || 0);
         setPill('pill-mavlink', msgRate > 0 ? msgRate.toFixed(0) + ' msg/s' : v.idle, msgRate > 0 ? 'ok' : 'err');
+        updateHostPills(data.host || {}, v);
+    }
+
+    function updateHostPills(h, v) {
+        var cm5 = document.getElementById('pill-cm5');
+        if (cm5) {
+            var t = typeof h.cpu_temp_c === 'number' ? h.cpu_temp_c : null;
+            var text = t === null ? 'N/A' : t.toFixed(1) + '°C';
+            var state = t === null ? '' : t >= 80 ? 'err' : t >= 70 ? 'warn' : 'ok';
+            if (h.undervoltage_now) { text += ' · ' + v.underVolt; state = 'err'; }
+            else if (h.throttled_now) { text += ' · ' + v.throttling; if (state === 'ok') state = 'warn'; }
+            setPill('pill-cm5', text, state);
+            var tip = [v.tempTip + ': ' + text];
+            if (h.throttled_raw) tip.push('get_throttled = ' + h.throttled_raw);
+            if (h.undervoltage_since_boot) tip.push('⚠ ' + v.underVolt + ' (boot)');
+            if (h.temp_limit_since_boot) tip.push('⚠ ' + v.throttling + ' (boot)');
+            cm5.title = tip.join('\n');
+        }
+        var fan = document.getElementById('pill-fan');
+        if (fan) {
+            if (typeof h.fan_level !== 'number') {
+                setPill('pill-fan', 'N/A', '');
+                return;
+            }
+            var pct = typeof h.fan_pwm_pct === 'number' ? h.fan_pwm_pct : null;
+            var rpm = typeof h.fan_rpm === 'number' ? h.fan_rpm : null;
+            var fText = h.fan_at_max ? v.fanMax : h.fan_level + '/' + h.fan_level_max;
+            if (pct !== null) fText += ' · ' + pct + '%';
+            var fState = h.fan_at_max ? 'warn' : 'ok';
+            if (pct > 0 && rpm === 0) { fText += ' · ' + v.fanStopped; fState = 'err'; }
+            else if (rpm) fText += ' · ' + rpm + ' rpm';
+            setPill('pill-fan', fText, fState);
+            fan.title = v.fanTip + ': ' + h.fan_level + '/' + h.fan_level_max + (pct !== null ? ' (PWM ' + pct + '%)' : '') + (rpm !== null ? ', ' + rpm + ' rpm' : '');
+        }
     }
 
     function pollStatus() {
@@ -431,7 +474,10 @@
         function openAuth(action) {
             hostAction = action;
             input.value = '';
+            input.disabled = false;
             error.textContent = '';
+            var submitBtn = document.getElementById('host-auth-submit');
+            if (submitBtn) submitBtn.hidden = false;
             title.textContent = action === 'poweroff' ? t('power.offTitle') : t('power.rebootTitle');
             desc.textContent = action === 'poweroff' ? t('power.offDesc') : t('power.rebootDesc');
             modal.hidden = false;
@@ -443,8 +489,10 @@
         document.getElementById('host-auth-cancel').addEventListener('click', closeAuth);
         modal.addEventListener('click', function (ev) { if (ev.target === modal) closeAuth(); });
 
+        var busy = false;
         form.addEventListener('submit', function (ev) {
             ev.preventDefault();
+            if (busy) return;
             var action = hostAction;
             var password = input.value;
             input.value = '';
@@ -452,6 +500,7 @@
                 error.textContent = t('power.password');
                 return;
             }
+            busy = true;
             var submit = document.getElementById('host-auth-submit');
             submit.disabled = true;
             fetch('/api/host/power', {
@@ -468,11 +517,15 @@
                 }
                 desc.textContent = (res.d && res.d.message) || '';
                 error.textContent = '';
+                input.disabled = true;
+                submit.hidden = true;
             }).catch(function () {
                 password = '';
+                desc.textContent = action === 'poweroff' ? t('power.offDesc') : t('power.rebootDesc');
                 error.textContent = 'Error';
             }).finally(function () {
                 password = '';
+                busy = false;
                 submit.disabled = false;
             });
         });

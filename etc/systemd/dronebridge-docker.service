@@ -2,7 +2,7 @@
 # Cài bởi: docker/setup.sh (thay @DOCKER_DIR@ / @INSTALL_DIR@)
 [Unit]
 Description=DroneBridge Docker (compose)
-After=docker.service network-online.target dronebridge-lcd-i2c-setup.service dronebridge-4g-init.service
+After=docker.service network-online.target dronebridge-lcd-i2c-setup.service
 Requires=docker.service
 Wants=network-online.target dronebridge-4g-init.service dronebridge-netmon.service
 

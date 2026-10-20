@@ -13,15 +13,46 @@ WEB_PORT="${WEB_PORT:-8080}"
 MAVLINK_PORT="${MAVLINK_PORT:-14550}"
 
 dronebridge_run_user() {
+    local u=""
     if [ -f /etc/systemd/system/dronebridge.service ]; then
-        local u
-        u="$(grep -m1 '^User=' /etc/systemd/system/dronebridge.service | cut -d= -f2)"
-        if [ -n "$u" ]; then
-            echo "$u"
-            return
-        fi
+        u="$(grep -m1 '^User=' /etc/systemd/system/dronebridge.service 2>/dev/null | cut -d= -f2 | tr -d '[:space:]' || true)"
     fi
-    echo "${SUDO_USER:-pi}"
+    if [ -n "$u" ] && id "$u" >/dev/null 2>&1; then
+        printf '%s\n' "$u"
+        return 0
+    fi
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ] && id "$SUDO_USER" >/dev/null 2>&1; then
+        printf '%s\n' "$SUDO_USER"
+        return 0
+    fi
+    local owner=""
+    if [ -d "$INSTALL_DIR" ]; then
+        owner="$(stat -c '%U' "$INSTALL_DIR" 2>/dev/null || true)"
+    fi
+    if [ -n "$owner" ] && [ "$owner" != "root" ] && id "$owner" >/dev/null 2>&1; then
+        printf '%s\n' "$owner"
+        return 0
+    fi
+    echo "Không tìm được user chạy dronebridge (User=${u:-trống} không tồn tại)" >&2
+    return 1
+}
+
+# Unit mẫu trong repo để User=pi. Máy này không có user pi — ghi lại user thật trước khi start.
+ensure_service_user() {
+    local user="$1"
+    local unit="/etc/systemd/system/dronebridge.service"
+    [ -f "$unit" ] || return 0
+    local group cur_user cur_group
+    group="$(id -gn "$user")"
+    cur_user="$(grep -m1 '^User=' "$unit" 2>/dev/null | cut -d= -f2 | tr -d '[:space:]' || true)"
+    cur_group="$(grep -m1 '^Group=' "$unit" 2>/dev/null | cut -d= -f2 | tr -d '[:space:]' || true)"
+    if [ "$cur_user" = "$user" ] && [ "$cur_group" = "$group" ]; then
+        return 0
+    fi
+    echo "▶ Unit User=${cur_user:-?}/Group=${cur_group:-?} không dùng được → ${user}/${group}"
+    sed -i "s/^User=.*/User=${user}/" "$unit"
+    sed -i "s/^Group=.*/Group=${group}/" "$unit"
+    systemctl daemon-reload
 }
 
 docker_dronebridge_exists() {
@@ -114,9 +145,12 @@ install_dronebridge_binary() {
         return 1
     fi
 
-    echo "▶ Cài binary → $BINARY_DST (user=$user)"
+    ensure_service_user "$user"
+    local group
+    group="$(id -gn "$user")"
+    echo "▶ Cài binary → $BINARY_DST (user=${user}:${group})"
     install -m 755 "$src" "$BINARY_DST"
-    chown "${user}:${user}" "$BINARY_DST"
+    chown "${user}:${group}" "$BINARY_DST"
 }
 
 wait_for_http() {
@@ -137,7 +171,10 @@ start_dronebridge() {
         echo "▶ Khởi động container dronebridge..."
         docker start dronebridge >/dev/null
     else
-        echo "▶ Khởi động dronebridge.service..."
+        local user
+        user="$(dronebridge_run_user)"
+        ensure_service_user "$user"
+        echo "▶ Khởi động dronebridge.service (User=${user})..."
         systemctl start dronebridge
         local i
         for i in $(seq 1 30); do
@@ -154,7 +191,7 @@ start_dronebridge() {
 }
 
 verify_embedded_ui() {
-    local marker="${1:-stream-cam0-enabled}"
+    local marker="${1:-port-cam0-enabled}"
     if ! grep -aq "$marker" "$BINARY_DST" 2>/dev/null; then
         echo "✗ Binary trên disk chưa chứa marker UI: $marker" >&2
         return 1
@@ -182,7 +219,7 @@ restart_dronebridge() {
         install_dronebridge_binary "$binary_src" || return 1
     fi
     start_dronebridge || return 1
-    verify_embedded_ui "stream-cam0-enabled" || return 1
+    verify_embedded_ui "port-cam0-enabled" || return 1
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

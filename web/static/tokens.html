@@ -36,6 +36,42 @@
       ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
       ::-webkit-scrollbar-thumb:hover { background: #475569; }
       
+      .token-tabs { display: none; align-items: center; gap: 0.35rem; }
+      .token-tabs .nav-btn {
+        border: 1px solid transparent;
+        background: transparent;
+        color: #cbd5e1;
+        border-radius: 8px;
+        padding: 0.4rem 0.75rem;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .token-tabs .nav-btn.token-tab-on {
+        background: rgba(255,255,255,0.12);
+        color: #fff;
+        border-color: rgba(255,255,255,0.16);
+      }
+      .session-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.85rem 1.25rem;
+      }
+      .session-span { grid-column: 1 / -1; }
+      .token-table { width: 100%; table-layout: fixed; border-collapse: collapse; text-align: left; }
+      .token-table col.key { width: 28%; }
+      .token-table col.state { width: 22%; }
+      .token-table col.when { width: 16%; }
+      .token-table col.exp { width: 18%; }
+      .token-table col.act { width: 16%; }
+      @media (max-width: 900px) {
+        .session-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+      html.db-embed #app > aside { display: none !important; }
+      html.db-embed .token-tabs { display: flex; }
+      html.db-embed .token-wrap { max-width: none !important; width: 100% !important; margin: 0 !important; }
+      html.db-embed #app > main > header { height: 56px !important; padding-left: 1.25rem !important; padding-right: 1.25rem !important; }
+      html.db-embed .token-body { padding: 1rem 1.25rem 1.5rem !important; }
       .animate-in { animation: fadeIn 0.3s ease-out; }
       @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
       @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
@@ -85,22 +121,60 @@
         </aside>
 
         <!-- Main Content -->
-        <main class="flex-1 flex flex-col min-w-0 h-screen overflow-hidden bg-slate-950 relative">
+        <main class="flex-1 flex flex-col min-w-0 min-h-0 overflow-y-auto bg-slate-950 relative">
             <div class="absolute top-0 left-0 w-full h-96 bg-gradient-to-b from-cyan-900/10 to-transparent pointer-events-none"></div>
 
             <!-- Header -->
-            <header class="h-20 border-b border-slate-800 bg-slate-950/80 backdrop-blur-md flex items-center justify-between px-8 shrink-0 z-10">
-                <h1 id="view-title" class="text-2xl font-bold text-slate-100 flex items-center gap-2">API Keys</h1>
+            <header class="h-20 border-b border-slate-800 bg-slate-950/80 backdrop-blur-md flex items-center justify-between px-8 shrink-0 z-10 gap-4">
+                <div class="flex items-center gap-4 min-w-0">
+                    <h1 id="view-title" class="text-xl font-bold text-slate-100">API Keys</h1>
+                    <div class="token-tabs" id="token-tabs">
+                        <button type="button" class="nav-btn token-tab-on" data-view="dashboard" onclick="setView('dashboard')">API Keys</button>
+                        <button type="button" class="nav-btn" data-view="history" onclick="setView('history')">Lịch sử</button>
+                    </div>
+                </div>
                 <button onclick="openCreateModal()" id="create-btn" class="flex items-center gap-2 bg-cyan-600 hover:bg-cyan-500 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-cyan-900/20 active:scale-95">
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
                     <span>Create API Key</span>
                 </button>
             </header>
 
-            <div class="flex-1 overflow-y-auto p-8 scroll-smooth z-0">
-                <div class="max-w-6xl mx-auto">
+            <div class="token-body flex-1 overflow-y-auto p-8 scroll-smooth z-0">
+                <div class="token-wrap max-w-6xl mx-auto">
                     <!-- Dashboard View -->
                     <div id="view-dashboard">
+                        <div id="session-card" class="mb-6 bg-slate-900 border border-slate-800 rounded-xl p-5">
+                            <div class="flex items-center justify-between gap-3 mb-2">
+                                <h2 class="text-sm font-semibold text-white">Phiên đăng ký</h2>
+                                <span id="session-badge" class="text-xs px-2 py-0.5 rounded border border-slate-700 text-slate-400">Đang tải</span>
+                            </div>
+                            <p id="session-note" class="text-sm text-slate-400 mb-4">Đăng ký drone tạo phiên xác thực với server. API key bên dưới là khóa riêng và chỉ hiện sau khi tạo key.</p>
+                            <dl class="session-grid text-sm">
+                                <div>
+                                    <dt class="text-[11px] uppercase tracking-wide text-slate-500">Trạng thái</dt>
+                                    <dd id="session-status" class="font-medium text-slate-200 mt-1">—</dd>
+                                </div>
+                                <div>
+                                    <dt class="text-[11px] uppercase tracking-wide text-slate-500">Hết hạn</dt>
+                                    <dd id="session-expires" class="font-mono text-slate-200 mt-1">—</dd>
+                                </div>
+                                <div>
+                                    <dt class="text-[11px] uppercase tracking-wide text-slate-500">IP phiên</dt>
+                                    <dd id="session-ip" class="font-mono text-slate-200 mt-1">—</dd>
+                                </div>
+                                <div>
+                                    <dt class="text-[11px] uppercase tracking-wide text-slate-500">Drone</dt>
+                                    <dd id="session-uuid" class="font-mono text-slate-200 mt-1 break-all">—</dd>
+                                </div>
+                                <div class="session-span">
+                                    <dt class="text-[11px] uppercase tracking-wide text-slate-500">Token phiên</dt>
+                                    <dd class="mt-1 flex items-start gap-2">
+                                        <span id="session-token" class="font-mono text-sm text-slate-200 break-all">—</span>
+                                        <button type="button" id="session-reveal" class="shrink-0 text-slate-500 hover:text-cyan-400 text-xs">Hiện</button>
+                                    </dd>
+                                </div>
+                            </dl>
+                        </div>
                         <div class="flex justify-between items-end mb-2">
                             <p class="text-slate-400 text-sm">
                                 Mỗi drone chỉ có <strong class="text-slate-300">một API key</strong> tại một thời điểm. Hủy key cũ trước khi tạo key mới.
@@ -234,6 +308,8 @@
         const HISTORY_KEY = 'db-token-history';
 
         let tokens = [];
+        let sessionTokenRaw = '';
+        let sessionVisible = false;
         let currentView = 'dashboard';
         let adjustingTokenId = null;
         let visibleTokens = new Set();
@@ -299,6 +375,51 @@
                 tokens = [];
             }
             renderView();
+            loadSession();
+        }
+
+        function renderSessionToken() {
+            const el = document.getElementById('session-token');
+            const btn = document.getElementById('session-reveal');
+            if (!el) return;
+            if (!sessionTokenRaw) {
+                el.textContent = '—';
+                if (btn) btn.classList.add('hidden');
+                return;
+            }
+            if (btn) btn.classList.remove('hidden');
+            el.textContent = sessionVisible ? sessionTokenRaw : maskKey(sessionTokenRaw);
+            if (btn) btn.textContent = sessionVisible ? 'Ẩn' : 'Hiện';
+        }
+
+        async function loadSession() {
+            const badge = document.getElementById('session-badge');
+            if (!badge) return;
+            try {
+                const res = await fetch('/api/v1/drone/session', { cache: 'no-store' });
+                const data = await res.json();
+                const ok = !!(res.ok && data.authenticated && data.token);
+                document.getElementById('session-status').textContent = data.status || (ok ? 'Authenticated' : 'Chưa xác thực');
+                document.getElementById('session-ip').textContent = data.local_ip || '—';
+                document.getElementById('session-uuid').textContent = data.drone_uuid || '—';
+                document.getElementById('session-expires').textContent = data.expires_at
+                    ? formatDate(data.expires_at) + ' · ' + getTimeRemaining(data.expires_at)
+                    : '—';
+                sessionTokenRaw = ok ? data.token : '';
+                renderSessionToken();
+                if (ok) {
+                    badge.textContent = 'Đang hoạt động';
+                    badge.className = 'text-xs px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-400';
+                    document.getElementById('session-note').textContent = 'Phiên này có vì drone đã đăng ký và đang xác thực với server. API key phía dưới chỉ hiện sau khi tạo key.';
+                } else {
+                    badge.textContent = 'Chưa có phiên';
+                    badge.className = 'text-xs px-2 py-0.5 rounded border border-slate-700 text-slate-400';
+                    document.getElementById('session-note').textContent = data.error || 'Chưa có phiên. Đăng ký drone và đợi dịch vụ xác thực xong.';
+                }
+            } catch (e) {
+                badge.textContent = 'Lỗi';
+                document.getElementById('session-status').textContent = e.message;
+            }
         }
 
         function updateCreateButton() {
@@ -381,14 +502,16 @@
             currentView = view;
             
             // Update nav buttons
-            document.querySelectorAll('.nav-btn').forEach(btn => {
+            document.querySelectorAll('#app > aside .nav-btn').forEach(btn => {
                 btn.className = 'nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/30';
             });
-            
             const activeBtn = document.getElementById(`nav-${view}`);
             if (activeBtn) {
                 activeBtn.className = 'nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all bg-slate-800/80 text-cyan-400 border border-slate-700/50 shadow-sm';
             }
+            document.querySelectorAll('.token-tabs .nav-btn').forEach(btn => {
+                btn.classList.toggle('token-tab-on', btn.dataset.view === view);
+            });
             
             // Update view title and create button
             const viewTitle = document.getElementById('view-title');
@@ -428,8 +551,8 @@
                         <div class="w-16 h-16 bg-slate-800/50 rounded-full flex items-center justify-center mb-4">
                             <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="opacity-50"><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/></svg>
                         </div>
-                        <h3 class="text-lg font-medium text-slate-300 mb-1">Chưa có API Key nào</h3>
-                        <p class="text-sm max-w-sm text-center mb-6">Tạo key mới để cấp quyền truy cập cho ứng dụng hoặc người dùng.</p>
+                        <h3 class="text-lg font-medium text-slate-200 mb-1">Chưa có API Key</h3>
+                        <p class="text-sm max-w-sm text-center mb-6">Phiên đăng ký ở phía trên là phần drone đã nối server. API key không tự tạo khi đăng ký — bấm tạo key nếu ứng dụng cần khóa này.</p>
                         <button onclick="openCreateModal()" class="text-cyan-400 hover:text-cyan-300 text-sm font-medium">
                             + Tạo key đầu tiên
                         </button>
@@ -439,10 +562,13 @@
             }
             
             let html = `
-                <table class="w-full text-left border-collapse">
+                <table class="token-table">
+                    <colgroup>
+                        <col class="key"><col class="state"><col class="when"><col class="exp"><col class="act">
+                    </colgroup>
                     <thead>
                         <tr class="border-b border-slate-800 bg-slate-950/30">
-                            <th class="p-4 pl-6 text-xs font-semibold text-slate-500 uppercase tracking-wider w-1/3">Token Key</th>
+                            <th class="p-4 pl-6 text-xs font-semibold text-slate-500 uppercase tracking-wider">Token Key</th>
                             <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Trạng thái kết nối</th>
                             <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Ngày tạo</th>
                             <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Hết hạn</th>
@@ -465,7 +591,7 @@
                                 </div>
                                 <div class="flex-1 min-w-0">
                                     <div class="flex items-center gap-2 mb-1">
-                                        <span class="font-mono text-sm text-slate-200 font-medium tracking-tight w-[280px] inline-block truncate align-bottom">${displayKey}</span>
+                                        <span class="font-mono text-sm text-slate-200 font-medium tracking-tight block truncate">${displayKey}</span>
                                         <button onclick="toggleVisibility('${token.id}')" class="text-slate-600 hover:text-slate-400 transition-colors" title="${isVisible ? 'Ẩn' : 'Hiện'}">
                                             ${isVisible ? 
                                                 '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>' :
@@ -761,6 +887,13 @@
 
         function init() {
             loadHistory();
+            const reveal = document.getElementById('session-reveal');
+            if (reveal) {
+                reveal.addEventListener('click', function () {
+                    sessionVisible = !sessionVisible;
+                    renderSessionToken();
+                });
+            }
             loadTokens();
             setView('dashboard');
             setInterval(loadTokens, 15000);

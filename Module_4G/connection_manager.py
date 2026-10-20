@@ -934,9 +934,8 @@ class NetworkMonitor:
         self._reinit_pending   = True
         self._reinit_pending_t = now
 
-        # timeout=15s chỉ áp dụng cho subprocess systemctl (client), không phải
-        # thời gian chạy thực của service — systemd tiếp tục chạy service nền.
-        run_root(["systemctl", "restart", SYSTEMD_4G_SERVICE], timeout=15)
+        # --no-block: vòng PBR không đứng chờ modem (oneshot có thể tới 180s).
+        run_root(["systemctl", "restart", "--no-block", SYSTEMD_4G_SERVICE], timeout=15)
         log.info(
             f"[REINIT] dronebridge-4g-init.service đã được kích hoạt — "
             f"polling phục hồi mỗi {MONITOR_INTERVAL_S}s (tối đa {REINIT_TIMEOUT_S}s)"

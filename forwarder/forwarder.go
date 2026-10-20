@@ -924,7 +924,9 @@ func (f *Forwarder) SetSyncManager(syncManager *SyncManager) {
 // Start begins the forwarder
 func (f *Forwarder) Start() error {
 	logger.Info("Starting MAVLink forwarder...")
-	if !forwardGpsRawToServer(f.cfg) {
+	if forwardGpsRawToServer(f.cfg) {
+		logger.Info("[MAVLINK] GPS_RAW_INT uplink ON — vệ tinh/fix/HDOP từ GPS, lat/lon/alt thay bằng GLOBAL_POSITION_INT (EKF)")
+	} else {
 		logger.Info("[MAVLINK] GPS_RAW_INT uplink OFF — server nhận GLOBAL_POSITION_INT / LOCAL_POSITION_NED (EKF)")
 	}
 
@@ -1097,8 +1099,12 @@ func (f *Forwarder) receiveAndForward() {
 						web.HandleTelemetryGpsRaw(m)
 					}
 					if now.Sub(f.lastGPSLog) > 30*time.Second {
-						logger.Info("[PIXHAWK] GPS: Fix=%d, Lat=%.6f, Lon=%.6f, Sats=%d",
-							m.FixType, float64(m.Lat)/1e7, float64(m.Lon)/1e7, m.SatellitesVisible)
+						ekfNote := "uplink tọa độ GPS"
+						if _, _, _, ok := f.gpsPx4.freshEkf(px4GpsStaleAfter); ok {
+							ekfNote = "uplink lat/lon/alt từ EKF"
+						}
+						logger.Info("[PIXHAWK] GPS: Fix=%d, Lat=%.6f, Lon=%.6f, Sats=%d | %s",
+							m.FixType, float64(m.Lat)/1e7, float64(m.Lon)/1e7, m.SatellitesVisible, ekfNote)
 						f.lastGPSLog = now
 					}
 				case *common.MessageSysStatus:
@@ -1116,6 +1122,7 @@ func (f *Forwarder) receiveAndForward() {
 					}
 				case *common.MessageGlobalPositionInt:
 					if sysID != 255 {
+						f.gpsPx4.noteGlobal(m)
 						web.HandleTelemetryGlobalPosition(m)
 					}
 				case *common.MessageLocalPositionNed:
@@ -1126,6 +1133,18 @@ func (f *Forwarder) receiveAndForward() {
 					// Forward to web server for parameter caching
 					web.HandleParamValue(m)
 					logger.Debug("[PARAM] %s = %v (%d/%d)", m.ParamId, m.ParamValue, m.ParamIndex, m.ParamCount)
+				case *common.MessageStatustext:
+					if sysID != 255 {
+						web.HandlePreflightStatustext(m)
+					}
+				case *common.MessageCommandAck:
+					if sysID != 255 {
+						web.HandlePreflightAck(m)
+					}
+				case *common.MessageEscStatus:
+					if sysID != 255 {
+						web.HandlePreflightEsc(m)
+					}
 				}
 
 				// Forward message to server
@@ -1165,11 +1184,24 @@ func (f *Forwarder) receiveAndForward() {
 				} else if msgID == mavlinkMsgGpsRawInt && !forwardGpsRawToServer(f.cfg) {
 					logger.Debug("[SKIP] GPS_RAW_INT withheld from server (EKF-only uplink)")
 				} else {
-					// Forward the raw frame directly to preserve original message
 					f.senderMu.RLock()
 					senderNode := f.senderNode
 					f.senderMu.RUnlock()
-					if err := senderNode.WriteFrameAll(e.Frame); err != nil {
+					outFrame := e.Frame
+					if msgID == mavlinkMsgGpsRawInt {
+						if lat, lon, alt, ok := f.gpsPx4.freshEkf(px4GpsStaleAfter); ok {
+							stamped, err := gpsUplinkFrame(e.Frame, lat, lon, alt)
+							if err != nil {
+								logger.Error("[FORWARD] GPS_RAW_INT EKF stamp: %v", err)
+								metrics.Global.IncFailedSend(msgTypeName)
+								f.incPktDropSendError()
+								continue
+							}
+							outFrame = stamped
+						}
+					}
+					// Forward the frame directly to preserve original sys/comp/sequence.
+					if err := senderNode.WriteFrameAll(outFrame); err != nil {
 						logger.Error("[FORWARD] Failed to forward frame %s: %v", msgTypeName, err)
 						metrics.Global.IncFailedSend(msgTypeName)
 						f.incPktDropSendError()

@@ -1791,9 +1791,8 @@ Loading GPS information...
                 ['cam0', 'cam1'].forEach(p => {
                     const port = data.ports[p];
                     if (!port) return;
-                    const sel = document.getElementById('port-' + p + '-overlay');
-                    if (sel && port.overlay) {
-                        sel.value = port.overlay;
+                    if (port.overlay) {
+                        setOverlaySelect(p, port.overlay);
                         onCameraSensorChange(p, true);
                     }
                     if (port.enabled !== undefined) {
@@ -2094,26 +2093,50 @@ Loading GPS information...
             }
         }
 
-        function ensureCameraRegistryLoaded() {
+        function ensureCameraRegistryLoaded(retries = 3) {
             if (cameraRegistry.length) {
+                const keep = { cam0: overlayForPort('cam0'), cam1: overlayForPort('cam1') };
                 fillOverlaySelects();
+                ['cam0', 'cam1'].forEach(p => setOverlaySelect(p, keep[p]));
                 refreshAllResolutionSelects();
                 return Promise.resolve();
             }
             return fetch('/api/camera/registry')
-                .then(r => r.json())
+                .then(r => {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.json();
+                })
                 .then(d => {
-                    if (d.registry) {
-                        if (d.registry.sensors) {
-                            cameraRegistry = d.registry.sensors;
-                        }
-                        if (d.registry.default_stream_profile) {
-                            cameraDefaultStreamProfile = d.registry.default_stream_profile;
-                        }
-                        fillOverlaySelects();
-                        refreshAllResolutionSelects();
+                    if (!d.registry || !Array.isArray(d.registry.sensors) || !d.registry.sensors.length) {
+                        throw new Error('registry rỗng');
                     }
+                    cameraRegistry = d.registry.sensors;
+                    if (d.registry.default_stream_profile) {
+                        cameraDefaultStreamProfile = d.registry.default_stream_profile;
+                    }
+                    const keep = { cam0: overlayForPort('cam0'), cam1: overlayForPort('cam1') };
+                    fillOverlaySelects();
+                    ['cam0', 'cam1'].forEach(p => setOverlaySelect(p, keep[p]));
+                    refreshAllResolutionSelects();
+                })
+                .catch(err => {
+                    if (retries <= 0) throw err;
+                    return new Promise(res => setTimeout(res, 1500))
+                        .then(() => ensureCameraRegistryLoaded(retries - 1));
                 });
+        }
+
+        function setOverlaySelect(port, overlay) {
+            const sel = document.getElementById('port-' + port + '-overlay');
+            if (!sel || !overlay) return;
+            const key = String(overlay).toLowerCase();
+            if (!Array.from(sel.options).some(o => o.value.toLowerCase() === key)) {
+                const opt = document.createElement('option');
+                opt.value = key;
+                opt.textContent = key.toUpperCase();
+                sel.appendChild(opt);
+            }
+            sel.value = key;
         }
 
         function loadCameraGlobalConfig() {
@@ -2138,6 +2161,7 @@ Loading GPS information...
             openModal('cameraSetupModal');
             populateLandingModeSelects();
             ensureCameraRegistryLoaded()
+                .catch(e => setCameraMsg('✗ Không tải được danh sách sensor: ' + e.message))
                 .then(() => loadCameraGlobalConfig())
                 .then(() => loadCameraPanelConfigs())
                 .then(() => refreshCameraDetect(false))
@@ -2878,7 +2902,10 @@ Loading GPS information...
         window.addEventListener('DOMContentLoaded', function() {
             populateLandingModeSelects();
             refreshNetworkStatus();
-            refreshCameraDetect(false);
+            ensureCameraRegistryLoaded()
+                .catch(() => {})
+                .then(() => refreshCameraDetect(false))
+                .catch(() => {});
             setInterval(refreshNetworkStatus, 10000);
         });
 

@@ -12,42 +12,42 @@ const telemetryStaleAfter = 5 * time.Second
 
 // TelemetrySnapshot is the latest PX4/MAVLink data for LCD and status APIs.
 type TelemetrySnapshot struct {
-	Connected  bool      `json:"connected"`
-	Valid      bool      `json:"valid"`
-	AltitudeM  float64   `json:"altitude_m"`
-	SpeedMs    float64   `json:"speed_ms"`
-	ClimbMs    float64   `json:"climb_ms"`
-	BatteryPct float64   `json:"battery_pct"`
-	VoltageV   float64   `json:"voltage_v"`
-	Satellites int       `json:"satellites"`
-	GpsFix     int       `json:"gps_fix"`
-	GpsLock    string    `json:"gps_lock"`
-	LatitudeDeg  float64 `json:"latitude_deg,omitempty"`
-	LongitudeDeg float64 `json:"longitude_deg,omitempty"`
-	Hdop         float64 `json:"hdop,omitempty"`
-	HeadingDeg   float64 `json:"heading_deg,omitempty"`
-	FlightMode string    `json:"flight_mode"`
-	LastUpdate time.Time `json:"last_update"`
+	Connected    bool      `json:"connected"`
+	Valid        bool      `json:"valid"`
+	AltitudeM    float64   `json:"altitude_m"`
+	SpeedMs      float64   `json:"speed_ms"`
+	ClimbMs      float64   `json:"climb_ms"`
+	BatteryPct   float64   `json:"battery_pct"`
+	VoltageV     float64   `json:"voltage_v"`
+	Satellites   int       `json:"satellites"`
+	GpsFix       int       `json:"gps_fix"`
+	GpsLock      string    `json:"gps_lock"`
+	LatitudeDeg  float64   `json:"latitude_deg,omitempty"`
+	LongitudeDeg float64   `json:"longitude_deg,omitempty"`
+	Hdop         float64   `json:"hdop,omitempty"`
+	HeadingDeg   float64   `json:"heading_deg,omitempty"`
+	FlightMode   string    `json:"flight_mode"`
+	LastUpdate   time.Time `json:"last_update"`
 }
 
 type telemetryCache struct {
 	mu sync.RWMutex
 
-	connected  bool
-	altitudeM  float64
-	speedMs    float64
-	climbMs    float64
-	batteryPct float64
-	voltageV   float64
-	satellites int
-	gpsFix     int
-	gpsLock    string
+	connected    bool
+	altitudeM    float64
+	speedMs      float64
+	climbMs      float64
+	batteryPct   float64
+	voltageV     float64
+	satellites   int
+	gpsFix       int
+	gpsLock      string
 	latitudeDeg  float64
 	longitudeDeg float64
 	hdop         float64
 	headingDeg   float64
-	flightMode string
-	lastUpdate time.Time
+	flightMode   string
+	lastUpdate   time.Time
 
 	hasAltitude bool
 	hasSpeed    bool
@@ -178,6 +178,8 @@ func HandleTelemetryHeartbeat(msg *common.MessageHeartbeat) {
 	telemetry.flightMode = px4FlightModeName(msg.CustomMode)
 	telemetry.hasMode = true
 	telemetry.touch()
+	mode := telemetry.flightMode
+	notePreflightHeartbeat(msg, mode)
 }
 
 // HandleTelemetryVfrHud updates HUD metrics from Pixhawk.
@@ -222,6 +224,9 @@ func HandleTelemetryGlobalPosition(msg *common.MessageGlobalPositionInt) {
 		telemetry.hasHeading = true
 	}
 	telemetry.touch()
+	if msg.Lat != 0 || msg.Lon != 0 {
+		notePreflightEkf()
+	}
 }
 
 // HandleTelemetryGpsRaw updates GPS fix/satellites from Pixhawk.
@@ -264,6 +269,7 @@ func HandleTelemetrySysStatus(msg *common.MessageSysStatus) {
 		telemetry.hasBattery = true
 	}
 	telemetry.touch()
+	notePreflightSys(msg)
 }
 
 func (t *telemetryCache) snapshot() TelemetrySnapshot {

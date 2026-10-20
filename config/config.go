@@ -55,7 +55,7 @@ type AuthConfig struct {
 	VehicleType               uint8   `yaml:"vehicle_type"`                // MAVLink HEARTBEAT.type for REGISTER_INIT v2
 	Model                     string  `yaml:"model"`                       // Custom model label (≤32 chars) for REGISTER_INIT v2
 	KeepaliveInterval         int     `yaml:"keepalive_interval"`          // seconds
-	ReconnectInterval         int     `yaml:"reconnect_interval"`          // seconds between full reconnect after failure
+	ReconnectInterval         int     `yaml:"reconnect_interval"`          // max seconds between reconnect attempts (backoff 10s, 20s, … up to this)
 	StartupRetryInterval      int     `yaml:"startup_retry_interval"`      // seconds between boot-time auth retries
 	SessionHeartbeatFrequency float64 `yaml:"session_heartbeat_frequency"` // Hz
 }
@@ -89,7 +89,7 @@ type NetworkConfig struct {
 	EthRecoverHeartbeats int    `yaml:"eth_recover_heartbeats"` // PX4 HEARTBEATs required before returning to Ethernet
 	Mode                 string `yaml:"mode"`                   // "4g_only", "wifi_only", "prefer_4g"
 	CloudWifiFallback    *bool  `yaml:"cloud_wifi_fallback"`    // false = never PBR wlan0 for server
-	ForwardGpsRawInt     *bool  `yaml:"forward_gps_raw_int"`    // false = withhold GPS_RAW_INT uplink (EKF-only)
+	ForwardGpsRawInt     *bool  `yaml:"forward_gps_raw_int"`    // true = uplink GPS_RAW_INT with EKF lat/lon/alt
 	FallbackDelay        int    `yaml:"fallback_delay"`         // seconds to wait before falling back to WiFi (default: 300)
 }
 

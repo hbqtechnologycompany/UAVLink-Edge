@@ -1,7 +1,9 @@
 # Đặt tại: /etc/systemd/system/dronebridge.service
 [Unit]
 Description=DroneBridge MAVLink Forwarder
-After=dronebridge-eth-setup.service dronebridge-camera-setup.service dronebridge-lcd-i2c-setup.service dronebridge-uart-setup.service dronebridge-netmon.service
+# Web :8080, camera, MAVLink không chờ modem. Netmon vẫn được kéo lên (Wants)
+# nhưng không After=: PBR áp sau, auth/VPN đã chạy nền khi có đường ra.
+After=dronebridge-eth-setup.service dronebridge-camera-setup.service dronebridge-lcd-i2c-setup.service dronebridge-uart-setup.service
 Wants=dronebridge-eth-setup.service dronebridge-camera-setup.service dronebridge-lcd-i2c-setup.service dronebridge-uart-setup.service dronebridge-netmon.service
 
 [Service]

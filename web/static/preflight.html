@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Điều kiện cất cánh</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="common-nav.css" rel="stylesheet">
+    <script src="common-nav.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: Inter, sans-serif; background: #eef1f6 !important; color: #18181b; }
+        .page { padding: 0.6rem 0.9rem 0.8rem; display: flex; flex-direction: column; gap: 0.6rem; }
+        @media (min-width: 981px) {
+            html, body { height: 100%; }
+            body { display: flex; flex-direction: column; overflow: hidden; }
+            html.db-embed.db-scroll { overflow: hidden; }
+            html.db-embed.db-scroll body { height: 100% !important; overflow: hidden !important; }
+            .page { flex: 1; min-height: 0; }
+            .layout { flex: 1; min-height: 0; align-items: stretch !important; }
+            .layout > .card, .side, .side > .card { min-height: 0; }
+        }
+        .banner {
+            background: #fff; border-radius: 10px; padding: 0.55rem 0.85rem;
+            border: 1px solid #fee2e2; border-left: 4px solid #e11d48;
+            font-size: 0.92rem; font-weight: 650; color: #18181b;
+        }
+        .banner.ready, .banner.armed, .banner.flying { border-color: #bbf7d0; border-left-color: #16a34a; }
+        .layout { display: grid; grid-template-columns: minmax(340px, 1.08fr) minmax(360px, 0.92fr); gap: 0.75rem; align-items: start; }
+        @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+        .card { background: #fff; border: 1px solid #e7e5e4; border-radius: 16px; padding: 0.7rem 0.9rem; box-shadow: 0 1px 2px rgba(15,23,42,.04); display: flex; flex-direction: column; }
+        .side { display: flex; flex-direction: column; gap: 0.6rem; }
+        .checks-card { flex: 1 1 0; }
+        #checks { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin-top: 0.35rem; padding-right: 0.2rem; }
+        .logs { flex: 0 0 auto; height: clamp(150px, 27vh, 280px); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.9rem; }
+        .logs > div { display: flex; flex-direction: column; min-height: 0; }
+        .logs h2 { margin: 0 0 0.25rem; font-size: 0.9rem; }
+        .logs .scroll { flex: 1; min-height: 0; overflow-y: auto; font-size: 0.82rem; color: #71717a; }
+        @media (max-width: 980px) {
+            .stage { height: 340px !important; flex: none !important; }
+            #checks { max-height: 60vh; }
+        }
+        @media (max-width: 640px) { .logs { grid-template-columns: 1fr; height: auto; } .logs .scroll { max-height: 30vh; } }
+        .head { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+        .head h2 { margin: 0; font-size: 0.98rem; font-weight: 750; display: flex; align-items: center; gap: 0.35rem; }
+        .chip { font-size: 0.72rem; font-weight: 700; background: #f4f4f5; color: #3f3f46; border-radius: 999px; padding: 0.18rem 0.55rem; }
+        .chip.pink { background: #ffe4e6; color: #e11d48; margin-left: auto; }
+        .tools { margin-left: auto; display: flex; gap: 0.35rem; align-items: center; }
+        .btn {
+            border: 1px solid #e4e4e7; background: #fff; color: #18181b; border-radius: 999px;
+            padding: 0.32rem 0.7rem; font: inherit; font-size: 0.75rem; font-weight: 700; cursor: pointer;
+        }
+        .btn.on { background: #e11d48; color: #fff; border-color: #e11d48; }
+        .btn.icon { width: 2rem; height: 2rem; padding: 0; border-radius: 999px; }
+        .stage { position: relative; flex: 1 1 0; min-height: 200px; margin-top: 0.45rem; border-radius: 12px; overflow: hidden; background: linear-gradient(180deg, #f8fafc, #eef2ff); }
+        .stage svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+        .legend { display: flex; gap: 0.85rem; flex-wrap: wrap; margin-top: 0.35rem; font-size: 0.72rem; color: #52525b; }
+        .dot { width: 0.62rem; height: 0.62rem; border-radius: 50%; display: inline-block; margin-right: 0.28rem; vertical-align: -1px; }
+        .row {
+            display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 0.65rem;
+            align-items: center; padding: 0.5rem 0.35rem; border-bottom: 1px solid #f4f4f5;
+        }
+        .row.bad, .row.warn { background: #fff1f2; border-left: 3px solid #e11d48; border-radius: 10px; margin: 0.28rem 0; padding-left: 0.55rem; }
+        .row.unknown, .row.idle { background: #fffbeb; border-left: 3px solid #b45309; border-radius: 10px; margin: 0.28rem 0; padding-left: 0.55rem; }
+        .bullet { width: 1.35rem; height: 1.35rem; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 0.78rem; font-weight: 800; }
+        .bullet.ok { background: #16a34a; }
+        .bullet.bad, .bullet.warn { background: #e11d48; }
+        .bullet.unknown, .bullet.idle { background: #b45309; }
+        .kicker { font-size: 0.72rem; font-weight: 700; }
+        .kicker.ok { color: #16a34a; }
+        .kicker.bad, .kicker.warn { color: #e11d48; }
+        .kicker.unknown, .kicker.idle { color: #b45309; }
+        .row b { display: block; font-size: 0.92rem; margin-top: 0.05rem; }
+        .detail { color: #71717a; font-size: 0.8rem; margin-top: 0.08rem; }
+        .acts { display: flex; gap: 0.35rem; align-items: center; }
+        .point { background: #e11d48; color: #fff; border: 0; border-radius: 8px; padding: 0.38rem 0.55rem; font: inherit; font-size: 0.72rem; font-weight: 800; cursor: pointer; }
+        .handle { background: #fff; color: #e11d48; border: 1px solid #fecdd3; border-radius: 8px; padding: 0.38rem 0.55rem; font: inherit; font-size: 0.72rem; font-weight: 700; cursor: pointer; }
+        .tick { width: 1.35rem; height: 1.35rem; border-radius: 50%; background: #dcfce7; color: #16a34a; display: grid; place-items: center; font-weight: 800; }
+        .fix { display: none; margin-top: 0.35rem; background: #fff7ed; color: #9a3412; border-radius: 8px; padding: 0.4rem 0.55rem; font-size: 0.78rem; }
+        .row.open .fix { display: block; }
+        .foot { display: flex; justify-content: flex-end; margin-top: 0.5rem; }
+        .solid { background: #e11d48; color: #fff; border: 0; border-radius: 999px; padding: 0.5rem 0.9rem; font: inherit; font-size: 0.8rem; font-weight: 750; cursor: pointer; white-space: nowrap; }
+        .log { font-size: 0.8rem; padding: 0.4rem 0; border-top: 1px solid #f4f4f5; color: #3f3f46; }
+        .log time { color: #a1a1aa; margin-right: 0.35rem; }
+        .hot-ring { filter: drop-shadow(0 0 6px #e11d48); }
+        .cams { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.6rem; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #f4f4f5; }
+        @media (max-width: 640px) { .cams { grid-template-columns: 1fr; } }
+        .cam { min-width: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+        .cam-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
+        .cam-name { font-size: 0.78rem; font-weight: 750; letter-spacing: .02em; }
+        .cam-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.66rem; color: #a1a1aa; }
+        .cam-stage { position: relative; height: clamp(120px, 25vh, 270px); border-radius: 10px; overflow: hidden; background: #161616; border: 1px solid #e7e5e4; }
+        @media (max-width: 980px) { .cam-stage { height: auto; aspect-ratio: 4 / 3; } }
+        .cam-stage img { width: 100%; height: 100%; object-fit: contain; display: block; background: #111; }
+        .cam-stage.is-empty img { visibility: hidden; }
+        .cam-empty { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; padding: 0.8rem; text-align: center; color: #a1a1aa; font-size: 0.78rem; }
+        .cam-stage.is-empty .cam-empty { display: flex; }
+        .cam-status { position: absolute; left: 0; right: 0; bottom: 0; margin: 0; padding: 0.3rem 0.5rem; font-size: 0.72rem; line-height: 1.3; color: #fff; background: rgba(190, 18, 60, .85); }
+        .cam-status:empty { display: none; }
+    </style>
+</head>
+<body>
+    <header class="db-shell-header">
+        <a href="/dashboard.html" class="db-back-btn">← Về Dashboard</a>
+        <h1 class="db-shell-title">Điều kiện cất cánh</h1>
+    </header>
+    <div class="page">
+        <div class="banner" id="banner">Đang đọc máy bay…</div>
+        <div class="layout">
+            <section class="card">
+                <div class="head">
+                    <h2>
+                        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 11.5 8 14.5 14 11.5V5.5L8 2.5 2 5.5v6Z" fill="none" stroke="#18181b" stroke-width="1.4"/><path d="M2 5.5 8 8.5 14 5.5M8 8.5V14.5" fill="none" stroke="#18181b" stroke-width="1.4"/></svg>
+                        Sơ đồ máy (Mô hình 3D)
+                    </h2>
+                    <span class="chip" id="kind-chip">Quad X</span>
+                    <div class="tools">
+                        <button type="button" class="btn on" id="btn-tags">Đang chỉ điểm lỗi</button>
+                        <button type="button" class="btn" id="btn-explode">Bóc tách</button>
+                        <button type="button" class="btn icon" id="btn-turn" title="Xoay">↻</button>
+                    </div>
+                </div>
+                <div class="stage" id="stage">
+                    <svg id="scene" viewBox="0 0 720 460"></svg>
+                </div>
+                <div class="legend">
+                    <span><i class="dot" style="background:#16a34a"></i>Đạt</span>
+                    <span><i class="dot" style="background:#e11d48"></i>Chưa đạt</span>
+                    <span><i class="dot" style="background:#d97706"></i>Cần chú ý</span>
+                    <span><i class="dot" style="background:#a1a1aa"></i>Chưa có số liệu</span>
+                </div>
+                <div class="cams">
+                    <article class="cam">
+                        <div class="cam-head">
+                            <span class="cam-name">CAM0</span>
+                            <span class="cam-path" id="cam-path-0"></span>
+                        </div>
+                        <div class="cam-stage is-empty" id="cam-stage-0">
+                            <img id="cam-img-0" alt="">
+                            <div class="cam-empty">Chưa có khung hình</div>
+                            <p class="cam-status" id="cam-status-0"></p>
+                        </div>
+                    </article>
+                    <article class="cam">
+                        <div class="cam-head">
+                            <span class="cam-name">CAM1</span>
+                            <span class="cam-path" id="cam-path-1"></span>
+                        </div>
+                        <div class="cam-stage is-empty" id="cam-stage-1">
+                            <img id="cam-img-1" alt="">
+                            <div class="cam-empty">Chưa có khung hình</div>
+                            <p class="cam-status" id="cam-status-1"></p>
+                        </div>
+                    </article>
+                </div>
+            </section>
+            <div class="side">
+                <section class="card checks-card">
+                    <div class="head">
+                        <h2>Việc cần đạt trước khi cất cánh</h2>
+                        <span class="chip" id="check-count">0 hạng mục</span>
+                        <span class="chip pink" id="bad-count">Phát hiện 0 điểm lỗi</span>
+                    </div>
+                    <div id="checks"></div>
+                    <div class="foot">
+                        <button type="button" class="solid" id="btn-all">Hiệu chuẩn tất cả lỗi</button>
+                    </div>
+                </section>
+                <section class="card logs">
+                    <div>
+                        <h2>Lệnh vừa nhận từ server</h2>
+                        <div class="scroll" id="acks">Chưa thấy lệnh từ server.</div>
+                    </div>
+                    <div>
+                        <h2>PX4 vừa nói</h2>
+                        <div class="scroll" id="notes">Chưa có dòng trạng thái.</div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+    <script>
+        var FIX = {
+            gyro: 'Để máy đứng yên trên mặt phẳng, rồi hiệu chuẩn con quay: commander calibrate gyro.',
+            accel: 'Hiệu chuẩn gia tốc đủ 6 mặt: commander calibrate accel.',
+            mag: 'Đưa máy ra xa sắt thép và xoay đủ hướng: commander calibrate mag.',
+            motors: 'Chưa có ESC_STATUS nên chưa biết động cơ nào hỏng. Kiểm tra dây ESC và bật telemetry ESC.',
+            gps: 'Đưa anten lên trời thoáng, đợi đủ vệ tinh.',
+            ekf: 'EKF chưa xuất vị trí toàn cục. Xem GPS và ngưỡng EKF2_REQ_PDOP.',
+            battery: 'Sạc pin hoặc kiểm tra cảm biến đo pin.',
+            baro: 'Che cảm biến áp suất khỏi gió rồi hiệu chuẩn lại.',
+            prearm: 'Sửa các mục đỏ bên trên, sau đó gửi lại lệnh mở khóa.',
+            rc: 'Bật tay điều khiển và kiểm tra liên kết RC.',
+            link: 'Kiểm tra cáp MAVLink giữa CM5 và Pixhawk.'
+        };
+        var KICKER = { ok: 'Đạt', bad: 'Chưa đạt', warn: 'Cần chú ý', idle: 'Chưa rõ', unknown: 'Chưa rõ' };
+        var showTags = true;
+        var exploded = false;
+        var yaw = 0;
+        var focus = '';
+        var last = null;
+
+        function worst(a, b) {
+            var rank = { bad: 4, warn: 3, unknown: 2, idle: 2, ok: 0 };
+            return (rank[a] || 0) >= (rank[b] || 0) ? a : b;
+        }
+        function project(x, y, z) {
+            var c = Math.cos(yaw), s = Math.sin(yaw);
+            var xr = x * c - y * s;
+            var yr = x * s + y * c;
+            var pitch = 0.95;
+            var cp = Math.cos(pitch), sp = Math.sin(pitch);
+            var depth = -xr * sp + z * cp;
+            var up = xr * cp + z * sp;
+            var f = 540 / (540 + depth * 0.12);
+            return { x: 360 + yr * f * 1.85, y: 250 - up * f * 1.85, depth: depth };
+        }
+        function poly(pts, fill) {
+            return '<polygon points="' + pts.map(function (p) { return p.x.toFixed(1) + ',' + p.y.toFixed(1); }).join(' ') + '" fill="' + fill + '"/>';
+        }
+        function corners(cx, cy, z, hx, hy) {
+            return [project(cx - hx, cy - hy, z), project(cx + hx, cy - hy, z), project(cx + hx, cy + hy, z), project(cx - hx, cy + hy, z)];
+        }
+        function slab(cx, cy, z, hx, hy, thick, top, side) {
+            var T = corners(cx, cy, z + thick, hx, hy);
+            var B = corners(cx, cy, z, hx, hy);
+            var html = '';
+            for (var i = 0; i < 4; i++) {
+                var j = (i + 1) % 4;
+                html += poly([T[i], T[j], B[j], B[i]], side);
+            }
+            html += poly(T, top);
+            return html;
+        }
+        function ring(cx, cy, z, r) {
+            var pts = [];
+            for (var i = 0; i < 28; i++) {
+                var a = i / 28 * Math.PI * 2;
+                pts.push(project(cx + Math.cos(a) * r, cy + Math.sin(a) * r, z));
+            }
+            return pts;
+        }
+        function arm3d(x0, y0, x1, y1) {
+            var z = 12, h = 6, w = 4.2;
+            var dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy) || 1;
+            var px = -dy / len * w, py = dx / len * w;
+            var top = [project(x0 + px, y0 + py, z + h), project(x1 + px, y1 + py, z + h), project(x1 - px, y1 - py, z + h), project(x0 - px, y0 - py, z + h)];
+            var bot = [project(x0 + px, y0 + py, z), project(x1 + px, y1 + py, z), project(x1 - px, y1 - py, z), project(x0 - px, y0 - py, z)];
+            return poly([top[0], top[1], bot[1], bot[0]], '#475569') + poly([top[2], top[3], bot[3], bot[2]], '#334155') + poly(top, '#94a3b8');
+        }
+        function blade(mx, my, z, len, w, ang, fill) {
+            var c = Math.cos(ang), s = Math.sin(ang);
+            var dx = c * len, dy = s * len, px = -s * w, py = c * w;
+            return poly([
+                project(mx - dx * 0.15 + px, my - dy * 0.15 + py, z),
+                project(mx + dx + px * 0.35, my + dy + py * 0.35, z),
+                project(mx + dx - px * 0.35, my + dy - py * 0.35, z),
+                project(mx - dx * 0.15 - px, my - dy * 0.15 - py, z)
+            ], fill);
+        }
+        function motorBody(mx, my, state, id) {
+            var gold = state === 'bad' ? '#ef4444' : '#f59e0b';
+            var side = state === 'bad' ? '#991b1b' : '#c2410c';
+            var prop = state === 'bad' ? '#fecaca' : '#f3d7a4';
+            var top = ring(mx, my, 22, 13);
+            var bot = ring(mx, my, 7, 14);
+            var iL = 0, iR = 0;
+            top.forEach(function (p, i) {
+                if (p.x < top[iL].x) iL = i;
+                if (p.x > top[iR].x) iR = i;
+            });
+            var html = poly(bot, '#0f172a');
+            html += poly([top[iL], top[iR], bot[iR], bot[iL]], side);
+            html += poly(top, gold);
+            html += blade(mx, my, 24, 30, 4, 0.55, prop);
+            html += blade(mx, my, 24.8, 30, 4, 0.55 + Math.PI / 2, prop);
+            html += poly(ring(mx, my, 23.2, 3.2), '#fff');
+            var cap = project(mx, my, 46);
+            var lip = project(mx, my, 24);
+            if (state !== 'ok') {
+                html += '<line x1="' + cap.x.toFixed(1) + '" y1="' + cap.y.toFixed(1) + '" x2="' + lip.x.toFixed(1) + '" y2="' + lip.y.toFixed(1) + '" stroke="#eab308" stroke-width="3" stroke-linecap="round"/>';
+                html += '<polygon points="' + lip.x.toFixed(1) + ',' + (lip.y + 7).toFixed(1) + ' ' + (lip.x - 6).toFixed(1) + ',' + (lip.y - 4).toFixed(1) + ' ' + (lip.x + 6).toFixed(1) + ',' + (lip.y - 4).toFixed(1) + '" fill="#eab308"/>';
+            }
+            var nameAt = project(mx, my, 2);
+            html += '<text x="' + nameAt.x.toFixed(1) + '" y="' + (nameAt.y + 14).toFixed(1) + '" text-anchor="middle" font-size="11" font-weight="700" font-family="Inter" fill="#64748b">' + id.toUpperCase() + '</text>';
+            return html;
+        }
+        function bubble(x, y, title, detail, fill, tx, ty) {
+            var w = 184, h = 40;
+            if (detail.length > 31) detail = detail.slice(0, 29) + '…';
+            var sx = tx < x ? x : tx > x + w ? x + w : tx;
+            var sy = ty < y ? y : ty > y + h ? y + h : ty;
+            var html = '<line x1="' + sx.toFixed(1) + '" y1="' + sy.toFixed(1) + '" x2="' + tx.toFixed(1) + '" y2="' + ty.toFixed(1) + '" stroke="' + fill + '" stroke-width="1.6"/>';
+            html += '<circle cx="' + tx.toFixed(1) + '" cy="' + ty.toFixed(1) + '" r="4" fill="' + fill + '"/>';
+            html += '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="8" fill="' + fill + '"/>';
+            html += '<text x="' + (x + 10) + '" y="' + (y + 16) + '" fill="#fff" font-size="11" font-weight="800" font-family="Inter">' + title + '</text>';
+            html += '<text x="' + (x + 10) + '" y="' + (y + 30) + '" fill="#fff" font-size="10" font-family="Inter" opacity="0.95">' + detail + '</text>';
+            return html;
+        }
+        function draw(kind, parts, checks) {
+            var by = {};
+            (parts || []).forEach(function (p) { by[p.id] = p; });
+            var find = function (id) {
+                for (var i = 0; i < checks.length; i++) if (checks[i].id === id) return checks[i];
+                return null;
+            };
+            var gyro = find('gyro'), accel = find('accel'), mag = find('mag'), motors = find('motors');
+            var imuState = worst(gyro && gyro.state, accel && accel.state);
+            var magState = mag && mag.state;
+            var motorState = motors && motors.state;
+            var reach = exploded ? 132 : 112;
+            var lift = exploded ? 28 : 0;
+            var spots = [];
+            if (kind === 'quad' || kind === 'rover') {
+                var d = reach * 0.7071;
+                spots = [
+                    { id: 'm1', x: d, y: d },
+                    { id: 'm3', x: d, y: -d },
+                    { id: 'm2', x: -d, y: -d },
+                    { id: 'm4', x: -d, y: d }
+                ];
+            } else if (kind === 'hex' || kind === 'octo' || kind === 'tri') {
+                var nArm = kind === 'hex' ? 6 : kind === 'octo' ? 8 : 3;
+                for (var i = 0; i < nArm; i++) {
+                    var ang = Math.PI / 2 - i * Math.PI * 2 / nArm;
+                    spots.push({ id: 'm' + (i + 1), x: Math.cos(ang) * reach, y: Math.sin(ang) * reach });
+                }
+            }
+            var grid = '';
+            for (var g = -4; g <= 4; g++) {
+                var a = project(-180, g * 44, 0), b = project(180, g * 44, 0);
+                var c = project(g * 44, -180, 0), e = project(g * 44, 180, 0);
+                grid += '<line x1="' + a.x.toFixed(1) + '" y1="' + a.y.toFixed(1) + '" x2="' + b.x.toFixed(1) + '" y2="' + b.y.toFixed(1) + '" stroke="#e2e8f0" stroke-width="1"/>';
+                grid += '<line x1="' + c.x.toFixed(1) + '" y1="' + c.y.toFixed(1) + '" x2="' + e.x.toFixed(1) + '" y2="' + e.y.toFixed(1) + '" stroke="#e2e8f0" stroke-width="1"/>';
+            }
+            var arms = '';
+            spots.forEach(function (m) {
+                var len = Math.hypot(m.x, m.y) || 1;
+                arms += arm3d(m.x / len * 20, m.y / len * 20, m.x / len * (len - 16), m.y / len * (len - 16));
+            });
+            var body = slab(0, 0, 6, 22, 22, 14, 'url(#bodyTop)', '#1e3a8a');
+            body += poly([project(20, 0, 21), project(8, 6, 21), project(8, -6, 21)], '#eff6ff');
+            var imuBad = imuState === 'bad' || imuState === 'warn';
+            var magBad = magState === 'bad' || magState === 'warn';
+            var stack = '';
+            stack += slab(0, 0, 20 + lift, 16, 16, 3, imuBad ? '#ef4444' : '#1e293b', imuBad ? '#991b1b' : '#0f172a');
+            stack += slab(0, 0, 24 + lift, 13, 13, 2.5, imuBad ? '#fecaca' : '#334155', imuBad ? '#b91c1c' : '#0f172a');
+            stack += slab(0, 0, 28 + lift, 10, 10, 2.2, imuBad ? '#fff' : '#475569', imuBad ? '#ef4444' : '#1e293b');
+            stack += slab(0, 1, 32 + lift, 6, 5, 2, magBad ? '#fb7185' : '#fbbf24', magBad ? '#9f1239' : '#b45309');
+            var hub = project(0, 0, 34 + lift);
+            var ring = '';
+            if (imuBad || magBad) {
+                ring = '<ellipse cx="' + hub.x.toFixed(1) + '" cy="' + hub.y.toFixed(1) + '" rx="34" ry="16" fill="none" stroke="#e11d48" stroke-width="2"/>';
+            }
+            var motorsSvg = '';
+            var motorPts = [];
+            spots.forEach(function (m) {
+                var part = by[m.id];
+                var st = (part && part.state) || motorState || 'unknown';
+                var at = project(m.x, m.y, 20);
+                motorPts.push(at);
+                motorsSvg += motorBody(m.x, m.y, st, m.id);
+            });
+            var center = project(0, 0, 18);
+            var vb = focus === 'imu' || focus === 'mag' ? [160, 70, 400, 280] : focus === 'motors' ? [40, 40, 640, 400] : [0, 0, 720, 460];
+            var bx = vb[0] + vb[2] / 2 - 92;
+            var calls = '';
+            var showImu = showTags && imuState && imuState !== 'ok' && imuState !== 'skip' && (!focus || focus === 'imu');
+            var showMag = showTags && magState && magState !== 'ok' && magState !== 'skip' && (!focus || focus === 'mag');
+            var showMotors = showTags && motorState && motorState !== 'ok' && motorState !== 'skip' && (!focus || focus === 'motors');
+            if (showMag) calls += bubble(bx, vb[1] + 6, 'LỖI LA BÀN TỪ TRƯỜNG', (mag && mag.detail) || 'Bị lệch hoặc nhiễu', '#be123c', hub.x, hub.y - 18);
+            if (showImu) calls += bubble(bx, vb[1] + 6 + (showMag ? 46 : 0), 'LỖI CON QUAY & GIA TỐC', 'IMU 6/1 trục chưa chuẩn', '#be123c', hub.x - 8, hub.y);
+            if (showMotors) {
+                var aim = motorPts[0] || center;
+                spots.forEach(function (m, idx) { if (m.id === 'm2') aim = motorPts[idx]; });
+                calls += bubble(bx, vb[1] + vb[3] - 46, motorState === 'bad' ? 'LỖI ĐỘNG CƠ' : 'CHƯA RÕ ĐỘNG CƠ', 'Chưa đủ telemetry ESC 4 động cơ', '#b45309', aim.x, aim.y - 8);
+            }
+            var note = spots.length ? '' : '<text x="360" y="430" text-anchor="middle" font-size="13" font-family="Inter" fill="#71717a">Loại máy này chưa có mô hình nhiều cánh. Danh sách bên phải vẫn là điều kiện thật.</text>';
+            var shadow = '<ellipse cx="' + center.x.toFixed(1) + '" cy="' + (center.y + 18).toFixed(1) + '" rx="78" ry="22" fill="rgba(15,23,42,.08)"/>';
+            var scene = document.getElementById('scene');
+            scene.setAttribute('viewBox', vb.join(' '));
+            scene.innerHTML = '<defs><linearGradient id="bodyTop" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7dd3fc"/><stop offset="1" stop-color="#2563eb"/></linearGradient></defs>' + grid + shadow + arms + body + stack + ring + motorsSvg + calls + note;
+        }
+        function render(data) {
+            last = data;
+            var v = data.verdict || {};
+            var banner = document.getElementById('banner');
+            banner.className = 'banner ' + (v.code || '');
+            banner.textContent = v.detail || v.title || '—';
+            var veh = data.vehicle || {};
+            var chip = document.getElementById('kind-chip');
+            chip.textContent = veh.kind === 'quad' ? 'Quad X' : (veh.label || 'Máy');
+            chip.title = 'PX4: ' + (veh.label || '—') + ' · Config: ' + (veh.configured_label || '—');
+            var checks = data.checks || [];
+            var shown = checks.filter(function (c) { return c.state !== 'skip'; });
+            var bad = shown.filter(function (c) { return c.state && c.state !== 'ok' && c.state !== 'skip'; });
+            document.getElementById('check-count').textContent = shown.length + ' hạng mục';
+            document.getElementById('bad-count').textContent = 'Phát hiện ' + bad.length + ' điểm lỗi';
+            draw(veh.kind || 'unknown', data.parts || [], checks);
+            var opened = {};
+            document.querySelectorAll('#checks .row.open').forEach(function (row) { opened[row.getAttribute('data-id')] = true; });
+            document.getElementById('checks').innerHTML = shown.map(function (c) {
+                var problem = c.state !== 'ok' && c.state !== 'skip';
+                var kick = KICKER[c.state] || c.state;
+                var end = problem
+                    ? '<div class="acts"><button type="button" class="point" data-point="' + c.id + '">ĐIỂM LỖI →</button><button type="button" class="handle" data-fix="' + c.id + '">Xử lý</button></div>'
+                    : '<div class="tick">✓</div>';
+                return '<div class="row ' + c.state + (opened[c.id] ? ' open' : '') + '" data-id="' + c.id + '"><div class="bullet ' + c.state + '">' + (problem ? '!' : '✓') + '</div><div><div class="kicker ' + c.state + '">' + kick + '</div><b>' + c.label + '</b><div class="detail">' + (c.detail || '') + '</div><div class="fix">' + (FIX[c.id] || c.detail || '') + '</div></div>' + end + '</div>';
+            }).join('');
+            document.getElementById('acks').innerHTML = (data.acks || []).map(function (a) {
+                return '<div class="log"><time>' + a.at + '</time><b>' + a.command_label + '</b> · ' + a.result_label + '<div>' + a.meaning + '</div></div>';
+            }).join('') || 'Chưa thấy lệnh từ server.';
+            document.getElementById('notes').innerHTML = (data.notes || []).map(function (n) {
+                return '<div class="log"><time>' + n.at + '</time>' + n.text + (n.meaning ? '<div>' + n.meaning + '</div>' : '') + '</div>';
+            }).join('') || 'PX4 chưa gửi dòng giải thích.';
+        }
+        function redraw() {
+            if (!last) return;
+            draw((last.vehicle || {}).kind || 'unknown', last.parts || [], last.checks || []);
+        }
+        document.getElementById('checks').addEventListener('click', function (ev) {
+            var point = ev.target.getAttribute('data-point');
+            var fix = ev.target.getAttribute('data-fix');
+            if (point) {
+                focus = point === 'gyro' || point === 'accel' || point === 'baro' || point === 'gps' || point === 'ekf' || point === 'battery' ? 'imu' : point;
+                if (point === 'mag') focus = 'mag';
+                if (point === 'motors') focus = 'motors';
+                showTags = true;
+                document.getElementById('btn-tags').classList.add('on');
+                document.getElementById('btn-tags').textContent = 'Đang chỉ điểm lỗi';
+                redraw();
+            }
+            if (fix) {
+                var row = ev.target.closest('.row');
+                if (row) row.classList.toggle('open');
+            }
+        });
+        document.getElementById('btn-tags').addEventListener('click', function () {
+            showTags = !showTags;
+            focus = '';
+            this.classList.toggle('on', showTags);
+            this.textContent = showTags ? 'Đang chỉ điểm lỗi' : 'Hiện điểm lỗi';
+            redraw();
+        });
+        document.getElementById('btn-explode').addEventListener('click', function () {
+            exploded = !exploded;
+            this.classList.toggle('on', exploded);
+            redraw();
+        });
+        document.getElementById('btn-turn').addEventListener('click', function () {
+            yaw += Math.PI / 2;
+            redraw();
+        });
+        document.getElementById('btn-all').addEventListener('click', function () {
+            document.querySelectorAll('#checks .row').forEach(function (row) {
+                if (row.querySelector('.fix')) row.classList.add('open');
+            });
+        });
+        function load() {
+            fetch('/api/preflight', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(render).catch(function () {
+                document.getElementById('banner').textContent = 'Không đọc được trạng thái';
+            });
+        }
+        load();
+        setInterval(load, 2000);
+
+        var camBusy = {};
+        function camFrame(id) {
+            if (camBusy[id] || document.hidden) return;
+            camBusy[id] = true;
+            var img = document.getElementById('cam-img-' + id);
+            var stage = document.getElementById('cam-stage-' + id);
+            fetch('/api/camera/preview?camera_id=' + id + '&t=' + Date.now(), { cache: 'no-store' })
+                .then(function (r) { return r.ok ? r.blob() : null; })
+                .then(function (blob) {
+                    if (!blob) {
+                        if (!img.dataset.obj) stage.classList.add('is-empty');
+                        return;
+                    }
+                    var next = URL.createObjectURL(blob);
+                    var prev = img.dataset.obj;
+                    img.src = next;
+                    img.dataset.obj = next;
+                    stage.classList.remove('is-empty');
+                    if (prev) URL.revokeObjectURL(prev);
+                })
+                .catch(function () {})
+                .then(function () { camBusy[id] = false; });
+        }
+        function camReport(id) {
+            if (document.hidden) return;
+            fetch('/api/camera/test-report?camera_id=' + id, { cache: 'no-store' })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (d.publish_path) document.getElementById('cam-path-' + id).textContent = d.publish_path;
+                    document.getElementById('cam-status-' + id).textContent = d.side === 'ok' ? '' : (d.verdict || 'Không có kết luận.');
+                })
+                .catch(function (err) {
+                    document.getElementById('cam-status-' + id).textContent = 'Không kiểm tra được: ' + err.message;
+                });
+        }
+        [0, 1].forEach(function (id) { camFrame(id); camReport(id); });
+        setInterval(function () { camFrame(0); camFrame(1); }, 200);
+        setInterval(function () { camReport(0); camReport(1); }, 2000);
+    </script>
+</body>
+</html>

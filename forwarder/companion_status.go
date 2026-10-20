@@ -23,6 +23,10 @@ type px4GpsCache struct {
 	satellites uint8
 	hasLocal   bool
 	lastLocal  time.Time
+	ekfAt      time.Time
+	ekfLat     int32
+	ekfLon     int32
+	ekfAlt     int32
 }
 
 func (c *px4GpsCache) noteGpsRaw(msg *common.MessageGpsRawInt) {
@@ -38,6 +42,29 @@ func (c *px4GpsCache) noteLocalPosition() {
 	defer c.mu.Unlock()
 	c.hasLocal = true
 	c.lastLocal = time.Now()
+}
+
+// noteGlobal stores the latest EKF global position (GLOBAL_POSITION_INT).
+// Lat/lon of 0 are ignored so an uninitialized estimator cannot pin the map at Null Island.
+func (c *px4GpsCache) noteGlobal(msg *common.MessageGlobalPositionInt) {
+	if msg == nil || (msg.Lat == 0 && msg.Lon == 0) {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ekfAt = time.Now()
+	c.ekfLat = msg.Lat
+	c.ekfLon = msg.Lon
+	c.ekfAlt = msg.Alt
+}
+
+func (c *px4GpsCache) freshEkf(maxAge time.Duration) (lat, lon, alt int32, ok bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.ekfAt.IsZero() || time.Since(c.ekfAt) > maxAge {
+		return 0, 0, 0, false
+	}
+	return c.ekfLat, c.ekfLon, c.ekfAlt, true
 }
 
 func (c *px4GpsCache) snapshot() (fixType, sats, px4Streaming, diagnosis uint8) {

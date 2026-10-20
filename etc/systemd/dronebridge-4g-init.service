@@ -2,7 +2,8 @@
 [Unit]
 Description=DroneBridge Cellular Modem Initialization
 After=network-pre.target dronebridge-lcd-i2c-setup.service
-Before=dronebridge-netmon.service dronebridge.service
+# Không Before= netmon hay dronebridge. Modem có sóng thì xong nhanh;
+# không có sóng thì timeout chỉ thuộc job này, không giữ web :8080, camera, MAVLink.
 DefaultDependencies=no
 
 [Service]

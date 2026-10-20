@@ -23,6 +23,8 @@ func startVPNAfterAuth(authClient *auth.Client, vpnMgr *vpn.Manager) error {
 	if vpnMgr == nil {
 		return nil
 	}
+	vpnStartMu.Lock()
+	defer vpnStartMu.Unlock()
 
 	logger.Info("[VPN] Post-auth: requesting VPN provisioning from router (0xB0)...")
 	if err := authClient.RequestVPNProvisioning(); err != nil {
@@ -267,6 +269,7 @@ func main() {
 
 	// Auth does not block MAVLink. cloud_ready is checked now, then again until the session is up.
 	go runAuthWhenReady(authClient, vpnMgr, fwd, cfg.Auth.StartupRetryInterval)
+	go superviseUplink(authClient, vpnMgr, fwd)
 
 	landingStop := make(chan struct{})
 	camera.StartLandingMavlinkBridge(cfg, fwd, landingStop)

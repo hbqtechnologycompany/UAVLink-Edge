@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 )
 
 func registerHostPowerRoutes() {
@@ -49,12 +51,12 @@ func handleHostPower(w http.ResponseWriter, r *http.Request) {
 	body.Password = ""
 	defer zeroBytes(pw)
 
-	unit := ""
+	// One sudo. --system keeps the unit on the system manager as root.
+	// Without it, a leftover user session bus makes logind ask Polkit again.
+	verb := ""
 	switch action {
-	case "reboot":
-		unit = "reboot.target"
-	case "poweroff":
-		unit = "poweroff.target"
+	case "reboot", "poweroff":
+		verb = action
 	default:
 		w.WriteHeader(http.StatusBadRequest)
 		writePowerMessage(w, "Hành động không hợp lệ.")
@@ -69,8 +71,12 @@ func handleHostPower(w http.ResponseWriter, r *http.Request) {
 	stdin := append(append([]byte{}, pw...), '\n')
 	defer zeroBytes(stdin)
 
-	cmd := exec.Command("sudo", "-S", "-k", "-p", "", "systemd-run", "--no-block", "--collect", "systemctl", "start", unit)
+	cmd := exec.Command("sudo", "-S", "-k", "-p", "", "--",
+		"/usr/bin/systemd-run", "--system", "--uid=0", "--gid=0", "--no-block", "--collect",
+		"/usr/bin/systemctl", verb)
 	cmd.Stdin = bytes.NewReader(stdin)
+	cmd.Env = sudoEnv()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	out, err := cmd.CombinedOutput()
 	defer zeroBytes(out)
 	if err != nil {
@@ -90,6 +96,20 @@ func handleHostPower(w http.ResponseWriter, r *http.Request) {
 		msg = "CM5 sẽ tắt nguồn."
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "message": msg})
+}
+
+func sudoEnv() []string {
+	env := make([]string, 0, 16)
+	for _, e := range os.Environ() {
+		if strings.HasPrefix(e, "DBUS_SESSION_BUS_ADDRESS=") ||
+			strings.HasPrefix(e, "XDG_RUNTIME_DIR=") ||
+			strings.HasPrefix(e, "XDG_SESSION_ID=") ||
+			strings.HasPrefix(e, "XDG_SESSION_TYPE=") {
+			continue
+		}
+		env = append(env, e)
+	}
+	return env
 }
 
 func writePowerMessage(w http.ResponseWriter, msg string) {

@@ -36,6 +36,7 @@ config     *VPNConfig
 tun        *netstack.Net
 dev        *device.Device
 running    bool
+startedAt  time.Time
 }
 
 func NewManager(configPath string) *Manager {
@@ -187,9 +188,48 @@ persistent_keepalive_interval=15
 	m.tun = tnet
 	m.dev = dev
 	m.running = true
+	m.startedAt = time.Now()
 	m.config = cfg
 
 return nil
+}
+
+// StartedAt returns when the tunnel was last brought up (zero when stopped).
+func (m *Manager) StartedAt() time.Time {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.running {
+		return time.Time{}
+	}
+	return m.startedAt
+}
+
+// HandshakeAge returns the time since the last completed WireGuard handshake.
+// ok is false while the tunnel is down or before the first handshake completes.
+func (m *Manager) HandshakeAge() (time.Duration, bool) {
+	m.mu.RLock()
+	dev := m.dev
+	running := m.running
+	m.mu.RUnlock()
+	if !running || dev == nil {
+		return 0, false
+	}
+	state, err := dev.IpcGet()
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(state, "\n") {
+		v, found := strings.CutPrefix(line, "last_handshake_time_sec=")
+		if !found {
+			continue
+		}
+		var secs int64
+		if _, err := fmt.Sscan(v, &secs); err != nil || secs <= 0 {
+			return 0, false
+		}
+		return time.Since(time.Unix(secs, 0)), true
+	}
+	return 0, false
 }
 
 func (m *Manager) DialUDP(remoteAddr string) (net.Conn, error) {

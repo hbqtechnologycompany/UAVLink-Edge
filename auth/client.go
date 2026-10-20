@@ -73,6 +73,8 @@ type Client struct {
 	reconnectDelay     time.Duration
 	reconnectInterval  time.Duration
 	nextReconnectAt    time.Time
+	reconnectFailures  int
+	recoverMu          sync.Mutex // one recovery (re-dial / re-auth) at a time
 	serverReachable    bool
 	everConnected      bool
 	disconnectCause    DisconnectCause
@@ -96,6 +98,7 @@ type Client struct {
 	// VPN Provisioning
 	vpnManager   *vpn.Manager
 	vpnReadyCh   chan struct{}
+	vpnReadyOnce sync.Once
 	vpnPublicKey string
 	vpnRouterIP  string
 
@@ -497,6 +500,7 @@ func (c *Client) markConnected() {
 	c.everConnected = true
 	c.disconnectCause = DisconnectNone
 	c.nextReconnectAt = time.Time{}
+	c.reconnectFailures = 0
 	c.lastRefreshOK = now
 	c.mu.Unlock()
 
@@ -537,11 +541,42 @@ func (c *Client) scheduleReconnectBackoff() {
 		return
 	}
 	c.mu.Lock()
-	c.nextReconnectAt = time.Now().Add(interval)
+	delay := 10 * time.Second << min(c.reconnectFailures, 6)
+	if delay > interval {
+		delay = interval
+	}
+	c.reconnectFailures++
+	c.nextReconnectAt = time.Now().Add(delay)
 	next := c.nextReconnectAt
 	c.mu.Unlock()
-	log.Printf("[RECONNECT] ⏳ Next full reconnect attempt at %s (interval %.0fs)",
-		next.Format("15:04:05"), interval.Seconds())
+	log.Printf("[RECONNECT] ⏳ Next full reconnect attempt at %s (wait %.0fs, max %.0fs)",
+		next.Format("15:04:05"), delay.Seconds(), interval.Seconds())
+}
+
+// IsRunning reports whether the first authentication succeeded and the keepalive loop is active.
+func (c *Client) IsRunning() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.running
+}
+
+// RecoverNow drops any reconnect backoff and verifies/re-establishes the server session
+// immediately (e.g. right after the uplink comes back). No-op while the session is healthy
+// or another recovery is already in progress.
+func (c *Client) RecoverNow(reason string) {
+	if !c.IsRunning() || c.IsAuthenticated() {
+		return
+	}
+	c.mu.Lock()
+	c.nextReconnectAt = time.Time{}
+	c.reconnectFailures = 0
+	c.mu.Unlock()
+	go func() {
+		log.Printf("[RECONNECT] ⚡ Recover now (%s)", reason)
+		if err := c.sendRefresh(); err != nil {
+			c.handleRefreshFailure(err)
+		}
+	}()
 }
 
 func (c *Client) reconnectBackoffActive() bool {
@@ -937,6 +972,11 @@ func (c *Client) handleRefreshFailure(err error) {
 	if errors.Is(err, ErrRefreshSkipped) {
 		return
 	}
+	if !c.recoverMu.TryLock() {
+		log.Printf("[REFRESH] ⏭️ Recovery already in progress, skipping duplicate")
+		return
+	}
+	defer c.recoverMu.Unlock()
 
 	var needReauth bool
 	var isNetworkError bool
@@ -1363,9 +1403,7 @@ func (c *Client) RequestVPNProvisioning() error {
 		return fmt.Errorf("failed to save VPN config: %w", err)
 	}
 
-	c.mu.Lock()
-	close(c.vpnReadyCh)
-	c.mu.Unlock()
+	c.vpnReadyOnce.Do(func() { close(c.vpnReadyCh) })
 
 	return nil
 }

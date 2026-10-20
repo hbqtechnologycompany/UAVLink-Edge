@@ -49,6 +49,7 @@ configure_host() {
     local cfg="$INSTALL_DIR/config.yaml"
     local bin_sh="$INSTALL_DIR/install"
     run_step "PBR" bash "$bin_sh/network/setup_pbr.sh"
+    run_step "NetworkManager auto-reconnect" bash "$bin_sh/network/setup_nm_policy.sh"
     run_step "Ethernet PX4" bash "$bin_sh/network/setup_eth.sh" "$cfg"
     run_step "LCD I2C" bash "$bin_sh/network/setup_lcd_i2c.sh" "$cfg"
     run_step "MAVLink UART" bash "$bin_sh/network/setup_mavlink_uart.sh"
@@ -235,6 +236,7 @@ chmod +x "$INSTALL_DIR/Module_Cellular/modem_init.py" 2>/dev/null || true
 chown -R "$RUN_USER:$GROUP_NAME" "$INSTALL_DIR"
 for root_script in \
     install/network/setup_pbr.sh \
+    install/network/setup_nm_policy.sh \
     install/network/setup_eth.sh \
     install/network/setup_lcd_i2c.sh \
     install/network/setup_mavlink_uart.sh \

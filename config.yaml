@@ -14,7 +14,7 @@ auth:
     vehicle_type: 0
     model: ""
     keepalive_interval: 30
-    reconnect_interval: 300
+    reconnect_interval: 60
     startup_retry_interval: 15
     session_heartbeat_frequency: 1
 cellular:
@@ -46,7 +46,8 @@ network:
     eth_recover_heartbeats: 2
     mode: prefer_4g
     cloud_wifi_fallback: false
-    forward_gps_raw_int: false
+    # Gửi GPS_RAW_INT để pilot đếm vệ tinh. lat/lon/alt trong bản tin được thay bằng GLOBAL_POSITION_INT (EKF).
+    forward_gps_raw_int: true
     fallback_delay: 300
 ethernet:
     interface: end0
