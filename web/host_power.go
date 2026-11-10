@@ -13,6 +13,75 @@ import (
 
 func registerHostPowerRoutes() {
 	http.HandleFunc("/api/host/power", handleHostPower)
+	http.HandleFunc("/api/host/register", handleHostRegister)
+}
+
+func handleHostRegister(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	if r.Method == http.MethodOptions {
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		writePowerMessage(w, "Phương thức không được phép.")
+		return
+	}
+
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		writePowerMessage(w, "Yêu cầu không hợp lệ.")
+		return
+	}
+	defer zeroBytes(raw)
+
+	var body struct {
+		Password string `json:"password"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		writePowerMessage(w, "Yêu cầu không hợp lệ.")
+		return
+	}
+	pw := []byte(body.Password)
+	body.Password = ""
+	defer zeroBytes(pw)
+
+	if len(bytes.TrimSpace(pw)) == 0 {
+		w.WriteHeader(http.StatusUnauthorized)
+		writePowerMessage(w, "Cần mật khẩu hệ thống.")
+		return
+	}
+
+	stdin := append(append([]byte{}, pw...), '\n')
+	defer zeroBytes(stdin)
+
+	cmd := exec.Command("sudo", "-S", "-k", "-p", "", "--",
+		"bash", "-lc",
+		"systemctl stop dronebridge >/dev/null 2>&1 || true; /opt/dronebridge/dronebridge --config /opt/dronebridge/config.yaml --register; systemctl start dronebridge")
+	cmd.Stdin = bytes.NewReader(stdin)
+	cmd.Env = sudoEnv()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	out, err := cmd.CombinedOutput()
+	defer zeroBytes(out)
+	if err != nil {
+		text := strings.ToLower(string(out))
+		if strings.Contains(text, "sorry") || strings.Contains(text, "password") {
+			w.WriteHeader(http.StatusUnauthorized)
+			writePowerMessage(w, "Mật khẩu không đúng.")
+			return
+		}
+		w.WriteHeader(http.StatusBadGateway)
+		writePowerMessage(w, "Không thể chạy lại quá trình đăng ký.")
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Đăng ký lại thành công. DroneBridge đã khởi động lại.",
+		"output":  strings.TrimSpace(string(out)),
+	})
 }
 
 // handleHostPower runs reboot or poweroff. The password stays in the POST body

@@ -52,8 +52,10 @@
                 cm5: 'CM5', fan: 'Quạt'
             },
             power: {
-                reboot: 'Reboot', off: 'Tắt nguồn',
+                register: 'Đăng ký lại', reboot: 'Reboot', off: 'Tắt nguồn',
                 password: 'Mật khẩu hệ thống', cancel: 'Hủy', confirm: 'Xác nhận',
+                registerTitle: 'Đăng ký lại DroneBridge',
+                registerDesc: 'Lệnh đăng ký sẽ chạy lại trên thiết bị và khởi động service sau khi hoàn tất. Chỉ nhập mật khẩu hệ thống một lần, mật khẩu không được lưu.',
                 rebootTitle: 'Khởi động lại CM5',
                 rebootDesc: 'Máy sẽ reboot. Chỉ nhập mật khẩu hệ thống một lần, mật khẩu không được lưu.',
                 offTitle: 'Tắt nguồn CM5',
@@ -101,8 +103,10 @@
                 cm5: 'CM5', fan: 'Fan'
             },
             power: {
-                reboot: 'Reboot', off: 'Power off',
+                register: 'Register again', reboot: 'Reboot', off: 'Power off',
                 password: 'System password', cancel: 'Cancel', confirm: 'Confirm',
+                registerTitle: 'Re-register DroneBridge',
+                registerDesc: 'The registration flow will rerun on the device and the service will restart afterward. Enter the system password once. It is not stored.',
                 rebootTitle: 'Reboot CM5',
                 rebootDesc: 'The board will reboot. Enter the system password once. It is not stored.',
                 offTitle: 'Power off CM5',
@@ -404,9 +408,32 @@
 
     function pollStatus() {
         fetch('/api/status')
-            .then(function (r) { return r.json(); })
-            .then(updateStatusPills)
-            .catch(function () { setPill('pill-system', I18N[lang].val.offline, 'err'); });
+            .then(function (r) {
+                return r.text().then(function (text) {
+                    if (!text || !text.trim()) {
+                        throw new Error('empty-status');
+                    }
+                    try {
+                        return JSON.parse(text);
+                    } catch (e) {
+                        throw new Error('invalid-json');
+                    }
+                });
+            })
+            .then(function (payload) {
+                if (!payload || typeof payload !== 'object') {
+                    throw new Error('empty-status');
+                }
+                updateStatusPills(payload);
+            })
+            .catch(function () {
+                setPill('pill-system', 'Waiting', 'warn');
+                setPill('pill-auth', 'Waiting for auth', 'warn');
+                setPill('pill-network', 'N/A', '');
+                setPill('pill-ip', 'N/A', '');
+                setPill('pill-uptime', 'N/A', '');
+                setPill('pill-mavlink', 'Waiting', 'warn');
+            });
     }
 
     function closeMobileSidebar() {
@@ -478,12 +505,21 @@
             error.textContent = '';
             var submitBtn = document.getElementById('host-auth-submit');
             if (submitBtn) submitBtn.hidden = false;
-            title.textContent = action === 'poweroff' ? t('power.offTitle') : t('power.rebootTitle');
-            desc.textContent = action === 'poweroff' ? t('power.offDesc') : t('power.rebootDesc');
+            if (action === 'register') {
+                title.textContent = t('power.registerTitle');
+                desc.textContent = t('power.registerDesc');
+            } else if (action === 'poweroff') {
+                title.textContent = t('power.offTitle');
+                desc.textContent = t('power.offDesc');
+            } else {
+                title.textContent = t('power.rebootTitle');
+                desc.textContent = t('power.rebootDesc');
+            }
             modal.hidden = false;
             input.focus();
         }
 
+        document.getElementById('btn-register').addEventListener('click', function () { openAuth('register'); });
         document.getElementById('btn-reboot').addEventListener('click', function () { openAuth('reboot'); });
         document.getElementById('btn-poweroff').addEventListener('click', function () { openAuth('poweroff'); });
         document.getElementById('host-auth-cancel').addEventListener('click', closeAuth);
@@ -503,7 +539,8 @@
             busy = true;
             var submit = document.getElementById('host-auth-submit');
             submit.disabled = true;
-            fetch('/api/host/power', {
+            var endpoint = action === 'register' ? '/api/host/register' : '/api/host/power';
+            fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ action: action, password: password })
@@ -521,7 +558,13 @@
                 submit.hidden = true;
             }).catch(function () {
                 password = '';
-                desc.textContent = action === 'poweroff' ? t('power.offDesc') : t('power.rebootDesc');
+                if (action === 'register') {
+                    desc.textContent = t('power.registerDesc');
+                } else if (action === 'poweroff') {
+                    desc.textContent = t('power.offDesc');
+                } else {
+                    desc.textContent = t('power.rebootDesc');
+                }
                 error.textContent = 'Error';
             }).finally(function () {
                 password = '';

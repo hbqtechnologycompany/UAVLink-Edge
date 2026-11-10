@@ -363,6 +363,7 @@ body {
 }
 
 .power-btn:disabled { opacity: 0.55; cursor: wait; }
+.power-btn.register { color: var(--shell-accent); border-color: var(--shell-accent); }
 .power-btn.reboot { color: var(--shell-warning); border-color: var(--shell-warning); }
 .power-btn.off { color: #fff; background: var(--shell-danger); border-color: var(--shell-danger); }
 .power-btn.ghost { background: transparent; color: var(--shell-text-secondary); }

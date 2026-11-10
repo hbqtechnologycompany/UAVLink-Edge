@@ -277,39 +277,121 @@
             return (b / 1048576).toFixed(2) + ' MB/s';
         }
 
+        function buildFallbackData(reason) {
+            return {
+                current_ip: 'N/A',
+                auth_status: 'Waiting for auth',
+                server_reachable: false,
+                disconnect_reason: reason || 'status unavailable',
+                uptime: '0s',
+                session_expires: null,
+                refresh_interval: 0,
+                px4_link: 'unknown',
+                udp_raw_in_per_sec: 0,
+                mavlink_uplink_msg_per_sec: 0,
+                udp_msg_per_sec: 0,
+                mavlink_uplink_bytes_per_sec: 0,
+                udp_bytes_per_sec: 0,
+                sent_packets: {},
+                failed_unhealthy: {},
+                failed_send: {},
+                logs: [{ time: new Date().toISOString(), level: 'WARN', message: reason || 'Waiting for DroneBridge status payload.' }],
+                error: reason || 'status unavailable'
+            };
+        }
+
+        function applyFallbackStatus(reason) {
+            const data = buildFallbackData(reason);
+            const fallbackStatus = document.getElementById('connection-status');
+            fallbackStatus.className = 'status-warn';
+            fallbackStatus.textContent = '● Waiting';
+
+            document.getElementById('current-ip').textContent = data.current_ip;
+            document.getElementById('auth-status').className = 'status-value status-warn';
+            document.getElementById('auth-status').textContent = data.auth_status;
+            document.getElementById('uptime').textContent = data.uptime;
+            document.getElementById('session-expiry').textContent = 'N/A';
+            document.getElementById('refresh-interval').textContent = 'N/A';
+            document.getElementById('time-remaining').textContent = 'N/A';
+            document.getElementById('time-remaining').className = 'status-value status-warn';
+            document.getElementById('px4-link').textContent = data.px4_link;
+            document.getElementById('px4-link').className = 'status-value status-warn';
+            document.getElementById('udp-raw-in').textContent = '0.0 msg/s';
+            document.getElementById('udp-msg-rate').textContent = '0.0 msg/s';
+            document.getElementById('udp-byte-rate').textContent = '0 B/s';
+
+            const tbody = document.querySelector('#packet-stats tbody');
+            tbody.innerHTML = '<tr><td colspan="6">No packet stats yet</td></tr>';
+
+            const logsDiv = document.getElementById('logs');
+            logsDiv.innerHTML = '<div class="log-entry log-WARN"><span class="log-time">--:--:--</span><span>' + (reason || 'Waiting for DroneBridge status payload.') + '</span></div>';
+        }
+
         function updateStatus() {
             fetch('/api/status')
-                .then(response => response.json())
+                .then(async response => {
+                    const text = await response.text();
+                    if (!text || !text.trim()) {
+                        throw new Error('empty status payload');
+                    }
+                    try {
+                        return JSON.parse(text);
+                    } catch (err) {
+                        throw new Error('invalid status payload');
+                    }
+                })
                 .then(data => {
-                    document.getElementById('connection-status').className = 'status-ok';
-                    document.getElementById('connection-status').textContent = '● Connected';
+                    if (!data || typeof data !== 'object') {
+                        throw new Error('empty status payload');
+                    }
 
-                    // Update System Status
+                    const effective = Object.assign({
+                        current_ip: 'N/A',
+                        auth_status: 'Waiting for auth',
+                        server_reachable: false,
+                        disconnect_reason: 'status unavailable',
+                        uptime: '0s',
+                        session_expires: null,
+                        refresh_interval: 0,
+                        px4_link: 'unknown',
+                        udp_raw_in_per_sec: 0,
+                        mavlink_uplink_msg_per_sec: 0,
+                        udp_msg_per_sec: 0,
+                        mavlink_uplink_bytes_per_sec: 0,
+                        udp_bytes_per_sec: 0,
+                        sent_packets: {},
+                        failed_unhealthy: {},
+                        failed_send: {},
+                        logs: []
+                    }, data);
+
+                    document.getElementById('connection-status').className = effective.server_reachable || effective.auth_status === 'Authenticated' ? 'status-ok' : 'status-warn';
+                    document.getElementById('connection-status').textContent = effective.server_reachable || effective.auth_status === 'Authenticated' ? '● Connected' : '● Waiting';
+
                     const ipEl = document.getElementById('current-ip');
-                    if (ipEl.textContent !== data.current_ip && data.current_ip !== "") {
+                    if (ipEl.textContent !== effective.current_ip && effective.current_ip !== "") {
                         ipEl.style.color = 'var(--accent-yellow)';
                         setTimeout(() => ipEl.style.color = '', 1000);
                     }
-                    ipEl.textContent = data.current_ip;
+                    ipEl.textContent = effective.current_ip || 'N/A';
 
                     const authStatus = document.getElementById('auth-status');
-                    const serverOk = data.server_reachable || data.auth_status === 'Authenticated';
-                    authStatus.className = 'status-value ' + (serverOk ? 'status-ok' : 'status-err');
-                    if (data.auth_status === 'Reconnecting') {
+                    const serverOk = effective.server_reachable || effective.auth_status === 'Authenticated';
+                    authStatus.className = 'status-value ' + (serverOk ? 'status-ok' : 'status-warn');
+                    if (effective.auth_status === 'Reconnecting') {
                         authStatus.textContent = 'Reconnecting...';
-                    } else if (data.auth_status === 'Disconnected' && data.disconnect_reason) {
-                        authStatus.textContent = 'Disconnected (' + data.disconnect_reason + ')';
+                    } else if (effective.auth_status === 'Disconnected' && effective.disconnect_reason) {
+                        authStatus.textContent = 'Disconnected (' + effective.disconnect_reason + ')';
                     } else {
-                        authStatus.textContent = data.auth_status;
+                        authStatus.textContent = effective.auth_status || 'Waiting for auth';
                     }
 
-                    document.getElementById('uptime').textContent = data.uptime.split('.')[0] + 's';
+                    document.getElementById('uptime').textContent = String(effective.uptime || '0s').split('.')[0] + 's';
 
-                    // Update Session Info
-                    if (data.session_expires && data.session_expires !== "0001-01-01T00:00:00Z") {
-                        const expiry = new Date(data.session_expires);
+                    if (effective.session_expires && effective.session_expires !== "0001-01-01T00:00:00Z") {
+                        const expiry = new Date(effective.session_expires);
                         document.getElementById('session-expiry').textContent = expiry.toLocaleTimeString('en-GB', { hour12: false });
-                        document.getElementById('refresh-interval').textContent = data.refresh_interval + 's';
+                        document.getElementById('refresh-interval').textContent = (effective.refresh_interval || 0) + 's';
 
                         const remaining = Math.max(0, Math.round((expiry - new Date()) / 1000));
                         const timeRemEl = document.getElementById('time-remaining');
@@ -321,73 +403,77 @@
                         } else {
                             timeRemEl.className = 'status-value status-ok';
                         }
+                    } else {
+                        document.getElementById('session-expiry').textContent = 'N/A';
+                        document.getElementById('refresh-interval').textContent = 'N/A';
+                        document.getElementById('time-remaining').textContent = 'N/A';
+                        document.getElementById('time-remaining').className = 'status-value status-warn';
                     }
 
                     const linkEl = document.getElementById('px4-link');
-                    const linkName = data.px4_link || 'ethernet';
+                    const linkName = effective.px4_link || 'unknown';
                     linkEl.textContent = linkName;
                     linkEl.className = 'status-value ' + (linkName === 'ethernet' ? 'status-ok' : (linkName === 'telem2' ? 'status-warn' : 'status-err'));
 
-                    const rawIn = data.udp_raw_in_per_sec || 0;
-                    const msgRate = data.mavlink_uplink_msg_per_sec || data.udp_msg_per_sec || 0;
-                    const byteRate = data.mavlink_uplink_bytes_per_sec || data.udp_bytes_per_sec || 0;
+                    const rawIn = Number(effective.udp_raw_in_per_sec || 0);
+                    const msgRate = Number(effective.mavlink_uplink_msg_per_sec || effective.udp_msg_per_sec || 0);
+                    const byteRate = Number(effective.mavlink_uplink_bytes_per_sec || effective.udp_bytes_per_sec || 0);
                     document.getElementById('udp-raw-in').textContent = rawIn.toFixed(1) + ' msg/s';
                     document.getElementById('udp-msg-rate').textContent = msgRate.toFixed(1) + ' msg/s';
                     document.getElementById('udp-byte-rate').textContent = formatByteRate(byteRate);
 
-                    // Update Packet Statistics
                     const tbody = document.querySelector('#packet-stats tbody');
                     tbody.innerHTML = '';
+                    const sentPackets = effective.sent_packets || {};
+                    const keys = Object.keys(sentPackets).sort();
 
-                    const keys = Object.keys(data.sent_packets).sort();
+                    if (keys.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="6">Waiting for packet stats</td></tr>';
+                    } else {
+                        keys.forEach(key => {
+                            const row = document.createElement('tr');
+                            const sent = sentPackets[key] || 0;
+                            const failedUnhealthy = effective.failed_unhealthy && effective.failed_unhealthy[key] ? effective.failed_unhealthy[key] : 0;
+                            const failedSend = effective.failed_send && effective.failed_send[key] ? effective.failed_send[key] : 0;
+                            const totalFailed = failedUnhealthy + failedSend;
+                            const sendTotal = sent + failedSend;
+                            const lossRate = sendTotal > 0 ? ((failedSend / sendTotal) * 100).toFixed(1) : '0.0';
 
-                    keys.forEach(key => {
-                        const row = document.createElement('tr');
-                        const sent = data.sent_packets[key] || 0;
-                        const failedUnhealthy = data.failed_unhealthy[key] || 0;
-                        const failedSend = data.failed_send[key] || 0;
-                        const totalFailed = failedUnhealthy + failedSend;
-                        const sendTotal = sent + failedSend;
-                        // Only include real send errors in loss percentage.
-                        const lossRate = sendTotal > 0 ? ((failedSend / sendTotal) * 100).toFixed(1) : '0.0';
+                            row.innerHTML = `
+                                <td>${key}</td>
+                                <td>${sent}</td>
+                                <td class="${failedUnhealthy > 0 ? 'status-err' : ''}">${failedUnhealthy}</td>
+                                <td class="${failedSend > 0 ? 'status-err' : ''}">${failedSend}</td>
+                                <td class="${totalFailed > 0 ? 'status-err' : ''}">${totalFailed}</td>
+                                <td class="${totalFailed > 0 ? 'status-err' : ''}">${lossRate}%</td>
+                            `;
+                            tbody.appendChild(row);
+                        });
+                    }
 
-                        row.innerHTML = `
-                            <td>${key}</td>
-                            <td>${sent}</td>
-                            <td class="${failedUnhealthy > 0 ? 'status-err' : ''}">${failedUnhealthy}</td>
-                            <td class="${failedSend > 0 ? 'status-err' : ''}">${failedSend}</td>
-                            <td class="${totalFailed > 0 ? 'status-err' : ''}">${totalFailed}</td>
-                            <td class="${totalFailed > 0 ? 'status-err' : ''}">${lossRate}%</td>
-                        `;
-                        tbody.appendChild(row);
-                    });
-
-                    // Update Logs
                     const logsDiv = document.getElementById('logs');
                     logsDiv.innerHTML = '';
-
-                    const logs = data.logs || [];
+                    const logs = Array.isArray(effective.logs) ? effective.logs : [];
                     if (logs.length === 0) {
                         logsDiv.innerHTML = '<div class="log-entry log-INFO"><span class="log-time">--:--:--</span><span>Chưa có nhật ký.</span></div>';
                     }
                     logs.slice().reverse().forEach(log => {
                         const entry = document.createElement('div');
-                        entry.className = `log-entry log-${log.level}`;
+                        entry.className = `log-entry log-${(log.level || 'INFO')}`;
 
-                        const date = new Date(log.time);
+                        const date = new Date(log.time || new Date());
                         const timeStr = date.toLocaleTimeString('en-GB', { hour12: false });
 
                         entry.innerHTML = `
                             <span class="log-time">${timeStr}</span>
-                            <span>${log.message}</span>
+                            <span>${log.message || 'No message'}</span>
                         `;
                         logsDiv.appendChild(entry);
                     });
                 })
                 .catch(err => {
                     console.error('Error fetching status:', err);
-                    document.getElementById('connection-status').className = 'status-err';
-                    document.getElementById('connection-status').textContent = '● Disconnected';
+                    applyFallbackStatus(err && err.message ? err.message : 'status unavailable');
                 });
         }
 

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -591,6 +592,67 @@ func formatUnixTimestamp(ts uint64) interface{} {
 	return time.Unix(int64(ts), 0).Format(time.RFC3339)
 }
 
+func sanitizeJSONValue(value interface{}) interface{} {
+	switch v := value.(type) {
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return 0.0
+		}
+		return v
+	case float32:
+		fv := float64(v)
+		if math.IsNaN(fv) || math.IsInf(fv, 0) {
+			return 0.0
+		}
+		return fv
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(v))
+		for k, val := range v {
+			out[k] = sanitizeJSONValue(val)
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, len(v))
+		for i, val := range v {
+			out[i] = sanitizeJSONValue(val)
+		}
+		return out
+	case map[string]int64:
+		out := make(map[string]int64, len(v))
+		for k, val := range v {
+			out[k] = val
+		}
+		return out
+	case map[string]string:
+		out := make(map[string]string, len(v))
+		for k, val := range v {
+			out[k] = val
+		}
+		return out
+	default:
+		rv := reflect.ValueOf(value)
+		if !rv.IsValid() {
+			return nil
+		}
+		switch rv.Kind() {
+		case reflect.Map:
+			out := make(map[string]interface{}, rv.Len())
+			for _, key := range rv.MapKeys() {
+				out[fmt.Sprint(key.Interface())] = sanitizeJSONValue(rv.MapIndex(key).Interface())
+			}
+			return out
+		case reflect.Slice, reflect.Array:
+			out := make([]interface{}, rv.Len())
+			for i := 0; i < rv.Len(); i++ {
+				out[i] = sanitizeJSONValue(rv.Index(i).Interface())
+			}
+			return out
+		default:
+			return value
+		}
+	}
+}
+
 func StartServer(port int, authClient *auth.Client, droneUUID string) {
 	registerHostPowerRoutes()
 	// Pre-load XML file into memory cache for faster serving
@@ -635,13 +697,51 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 	http.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-cache")
-		snap := metrics.Global.GetSnapshot()
+
+		snap := map[string]interface{}{
+			"current_ip":             "",
+			"auth_status":            "Waiting for auth",
+			"server_reachable":       false,
+			"disconnect_reason":      "status unavailable",
+			"uptime":                 "0s",
+			"session_expires":        nil,
+			"refresh_interval":       0,
+			"udp_raw_in_per_sec":     0,
+			"udp_accepted_per_sec":   0,
+			"udp_msg_per_sec":        0,
+			"udp_bytes_per_sec":      0,
+			"sent_packets":           map[string]int64{},
+			"failed_packets":         map[string]int64{},
+			"failed_unhealthy":       map[string]int64{},
+			"failed_send":            map[string]int64{},
+			"logs":                   []interface{}{},
+			"error":                  "status unavailable",
+			"mavlink_diagnostics":    nil,
+		}
+
+		if metrics.Global != nil {
+			if liveSnap := metrics.Global.GetSnapshot(); liveSnap != nil {
+				snap = liveSnap
+			}
+		}
+		if _, ok := snap["error"]; !ok {
+			snap["error"] = ""
+		}
+		if _, ok := snap["logs"]; !ok {
+			snap["logs"] = []interface{}{}
+		}
 		if diag := getMavlinkDiagnostics(); diag != nil {
 			snap["mavlink_diagnostics"] = diag
 		}
 		mergeNetworkIntoSnapshot(snap)
 		snap["host"] = hostThermalStatus()
-		json.NewEncoder(w).Encode(snap)
+		snap = sanitizeJSONValue(snap).(map[string]interface{})
+
+		if err := json.NewEncoder(w).Encode(snap); err != nil {
+			log.Printf("[WEB] failed to encode status payload: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":"status encoding failed"}`))
+		}
 	})
 
 	http.HandleFunc("/api/preflight", func(w http.ResponseWriter, r *http.Request) {
