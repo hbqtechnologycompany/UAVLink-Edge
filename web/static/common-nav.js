@@ -1,4 +1,37 @@
 (function () {
+    // Nhãn board (CM5 / CM2) cho mọi trang: phần tử .db-board nhận board.label,
+    // .db-board-name nhận board.name; script trang dùng window.dbBoardLabel().
+    var board = null;
+
+    function applyBoard(next) {
+        if (!next || !next.label) return;
+        board = next;
+        document.documentElement.setAttribute('data-board', board.id);
+        document.querySelectorAll('.db-board').forEach(function (el) { el.textContent = board.label; });
+        document.querySelectorAll('.db-board-name').forEach(function (el) { el.textContent = board.name; });
+        document.dispatchEvent(new CustomEvent('db-board', { detail: board }));
+    }
+
+    window.dbBoardLabel = function () { return board ? board.label : 'board'; };
+    window.dbBoard = function () { return board; };
+
+    window.addEventListener('message', function (e) {
+        if (e.origin === location.origin && e.data && e.data.type === 'db-board') applyBoard(e.data.board);
+    });
+
+    function loadBoard() {
+        if (board) return;
+        fetch('/api/system/board', { cache: 'no-store' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(applyBoard)
+            .catch(function () { /* giữ nhãn mặc định */ });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', loadBoard);
+    } else {
+        loadBoard();
+    }
+
     if (new URLSearchParams(window.location.search).get('embed') !== '1') return;
 
     document.documentElement.classList.add('db-embed');

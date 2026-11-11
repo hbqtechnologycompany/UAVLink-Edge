@@ -54,7 +54,7 @@ var stdLogBridgeOnce sync.Once
 
 var defaultLogger = &Logger{
 	level:                    INFO,
-	logger:                   log.New(os.Stdout, "", log.LstdFlags),
+	logger:                   log.New(lineWriter{}, "", log.LstdFlags),
 	useUnixTime:              false,
 	onlyDebugSections:        false,
 	showStartupInfo:          true,
@@ -87,12 +87,8 @@ func ConfigureScopeFilters(serverConnectionOnly, showWebInteractionLogs bool) {
 type stdLogFilterWriter struct{}
 
 func (w *stdLogFilterWriter) Write(p []byte) (int, error) {
-	msg := string(p)
-	if shouldEmitStdMessage(msg) {
-		_, err := os.Stdout.Write(p)
-		if err != nil {
-			return 0, err
-		}
+	if shouldEmitStdMessage(string(p)) {
+		writeLine(p)
 	}
 	return len(p), nil
 }

@@ -44,6 +44,29 @@ func hwmonByName(name string) string {
 	return ""
 }
 
+// ofNodeName trả tên node device-tree của một thiết bị sysfs (vd "dronebridge-fan").
+func ofNodeName(dev string) string {
+	if p, err := filepath.EvalSymlinks(filepath.Join(dev, "of_node")); err == nil {
+		return filepath.Base(p)
+	}
+	return ""
+}
+
+// fanHwmon: WalnutPi dùng node /dronebridge-fan (node hãng /pwm-fan lấy tach ở chân GND của
+// carrier CM5); CM5 dùng cooling_fan của Raspberry Pi; còn lại hwmon pwmfan đầu tiên.
+func fanHwmon() string {
+	dirs, _ := filepath.Glob("/sys/class/hwmon/hwmon*")
+	for _, d := range dirs {
+		if ofNodeName(d) == "dronebridge-fan" {
+			return d
+		}
+	}
+	if fan := firstGlob("/sys/devices/platform/cooling_fan/hwmon/hwmon*"); fan != "" {
+		return fan
+	}
+	return hwmonByName("pwmfan")
+}
+
 func readThrottled() (int64, bool) {
 	throttleCache.Lock()
 	defer throttleCache.Unlock()
@@ -74,25 +97,26 @@ func hostThermalStatus() map[string]interface{} {
 		out["cpu_temp_c"] = float64(v) / 1000
 	}
 	devs, _ := filepath.Glob("/sys/class/thermal/cooling_device*")
+	cooling := ""
 	for _, d := range devs {
 		b, err := os.ReadFile(filepath.Join(d, "type"))
 		if err != nil || strings.TrimSpace(string(b)) != "pwm-fan" {
 			continue
 		}
-		cur, ok1 := readSysInt(filepath.Join(d, "cur_state"))
-		max, ok2 := readSysInt(filepath.Join(d, "max_state"))
+		if cooling == "" || ofNodeName(filepath.Join(d, "device")) == "dronebridge-fan" {
+			cooling = d
+		}
+	}
+	if cooling != "" {
+		cur, ok1 := readSysInt(filepath.Join(cooling, "cur_state"))
+		max, ok2 := readSysInt(filepath.Join(cooling, "max_state"))
 		if ok1 && ok2 {
 			out["fan_level"] = cur
 			out["fan_level_max"] = max
 			out["fan_at_max"] = max > 0 && cur >= max
 		}
-		break
 	}
-	fan := firstGlob("/sys/devices/platform/cooling_fan/hwmon/hwmon*")
-	if fan == "" {
-		fan = hwmonByName("pwmfan")
-	}
-	if fan != "" {
+	if fan := fanHwmon(); fan != "" {
 		if v, ok := readSysInt(filepath.Join(fan, "pwm1")); ok {
 			out["fan_pwm_pct"] = int(v * 100 / 255)
 		}

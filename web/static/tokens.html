@@ -164,16 +164,52 @@
                                 </div>
                                 <div>
                                     <dt class="text-[11px] uppercase tracking-wide text-slate-500">Drone</dt>
-                                    <dd id="session-uuid" class="font-mono text-slate-200 mt-1 break-all">—</dd>
+                                    <dd class="mt-1 flex items-start gap-2">
+                                        <span id="session-uuid" class="font-mono text-slate-200 break-all">—</span>
+                                        <button type="button" id="session-uuid-reveal" class="shrink-0 text-slate-500 hover:text-cyan-400 text-xs">Hiện</button>
+                                    </dd>
                                 </div>
                                 <div class="session-span">
                                     <dt class="text-[11px] uppercase tracking-wide text-slate-500">Token phiên</dt>
                                     <dd class="mt-1 flex items-start gap-2">
                                         <span id="session-token" class="font-mono text-sm text-slate-200 break-all">—</span>
-                                        <button type="button" id="session-reveal" class="shrink-0 text-slate-500 hover:text-cyan-400 text-xs">Hiện</button>
+                                        <span class="shrink-0 text-slate-600 text-xs" title="Token phiên là bí mật giữa drone và server, không hiển thị đầy đủ">bí mật</span>
                                     </dd>
                                 </div>
                             </dl>
+                            <form id="rereg-form" class="mt-5 pt-4 border-t border-slate-800" autocomplete="off">
+                                <div class="flex items-center justify-between gap-3 mb-2">
+                                    <h3 class="text-sm font-semibold text-white">Đổi UUID / đăng ký lại</h3>
+                                    <span id="rereg-identity" class="text-[11px] text-slate-500 font-mono break-all"></span>
+                                </div>
+                                <p class="text-xs text-slate-500 mb-3">Để trống ô UUID để đăng ký lại với UUID hiện tại, hoặc nhập / tạo UUID mới. Nhấn <strong class="text-slate-300">Đăng ký lại</strong>: hệ thống ghi UUID và loại phương tiện vào config, đăng ký với server, lưu secret mới và khởi động lại DroneBridge. Lỗi thì tự khôi phục cấu hình cũ.</p>
+                                <div id="rereg-vehicle-alert" class="hidden mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"></div>
+                                <div class="flex flex-wrap gap-2 items-stretch">
+                                    <input type="text" id="rereg-uuid" spellcheck="false" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" maxlength="36" class="flex-1 min-w-[18rem] bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm font-mono text-slate-200 focus:outline-none focus:border-cyan-500/50 placeholder:text-slate-600" />
+                                    <button type="button" id="rereg-current" class="px-3 py-2 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:border-slate-500 text-sm" title="Xóa ô — đăng ký lại với UUID đang dùng">Giữ UUID hiện tại</button>
+                                    <button type="button" id="rereg-random" class="px-3 py-2 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:border-slate-500 text-sm" title="Tạo UUID v4 ngẫu nhiên">UUID mới</button>
+                                </div>
+                                <div class="flex flex-wrap gap-2 items-center mt-2">
+                                    <label for="rereg-vtype" class="text-xs text-slate-400">Loại phương tiện (server chọn giao diện theo loại này)</label>
+                                    <select id="rereg-vtype" class="flex-1 min-w-[14rem] bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-cyan-500/50">
+                                        <option value="auto">Theo PX4</option>
+                                        <option value="2">Máy bay 4 cánh quạt (2)</option>
+                                        <option value="13">Máy bay 6 cánh quạt (13)</option>
+                                        <option value="14">Máy bay 8 cánh quạt (14)</option>
+                                        <option value="1">Máy bay cánh cố định (1)</option>
+                                        <option value="22">VTOL (22)</option>
+                                        <option value="4">Trực thăng (4)</option>
+                                        <option value="10">Xe mặt đất (10)</option>
+                                        <option value="12">Tàu ngầm (12)</option>
+                                    </select>
+                                </div>
+                                <div class="flex flex-wrap gap-2 items-stretch mt-2">
+                                    <input type="password" id="rereg-password" autocomplete="current-password" placeholder="Mật khẩu hệ thống (sudo)" class="flex-1 min-w-[14rem] bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-cyan-500/50 placeholder:text-slate-600" />
+                                    <button type="submit" id="rereg-submit" class="px-5 py-2 rounded-lg bg-cyan-600 text-white hover:bg-cyan-500 transition-colors font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed">Đăng ký lại</button>
+                                </div>
+                                <p id="rereg-status" class="text-sm mt-3 hidden"></p>
+                                <pre id="rereg-log" class="hidden mt-2 max-h-48 overflow-auto text-[11px] leading-snug bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-400 whitespace-pre-wrap"></pre>
+                            </form>
                         </div>
                         <div class="flex justify-between items-end mb-2">
                             <p class="text-slate-400 text-sm">
@@ -245,6 +281,11 @@
                         Tối thiểu: 1 giờ • Tối đa: 30 ngày
                     </p>
                 </div>
+                <div class="mb-6">
+                    <label class="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-3" for="create-password">Mật khẩu hệ thống</label>
+                    <input type="password" id="create-password" autocomplete="current-password" placeholder="Tạo key là cấp quyền truy cập drone" class="w-full bg-slate-950 border border-slate-700 text-slate-200 text-sm rounded-lg px-4 py-3 focus:outline-none focus:border-cyan-500/50 placeholder:text-slate-600" />
+                    <p class="mt-2 text-[11px] text-slate-500">Key đầy đủ chỉ hiện ngay sau khi tạo. Xem lại sau đó cần nhập mật khẩu.</p>
+                </div>
 
                 <div class="flex justify-end gap-3 pt-2">
                     <button onclick="closeCreateModal()" class="px-4 py-2.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors text-sm font-medium">
@@ -296,6 +337,20 @@
         </div>
     </div>
 
+    <!-- Password Modal: xem giá trị bảo mật (UUID / API key) -->
+    <div id="pw-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <form id="pw-form" class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm shadow-2xl p-6" autocomplete="off">
+            <h3 id="pw-title" class="text-base font-bold text-white mb-1">Xác nhận</h3>
+            <p id="pw-desc" class="text-sm text-slate-400 mb-4"></p>
+            <input type="password" id="pw-input" autocomplete="current-password" placeholder="Mật khẩu hệ thống" class="w-full bg-slate-950 border border-slate-700 text-slate-200 text-sm rounded-lg px-4 py-3 focus:outline-none focus:border-cyan-500/50 placeholder:text-slate-600" />
+            <p id="pw-error" class="text-sm text-red-400 mt-2 min-h-[1.25rem]"></p>
+            <div class="flex gap-3 mt-2">
+                <button type="button" id="pw-cancel" class="flex-1 py-2.5 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 text-sm font-medium">Hủy</button>
+                <button type="submit" id="pw-submit" class="flex-1 py-2.5 rounded-lg bg-cyan-600 text-white hover:bg-cyan-500 text-sm font-medium">Xác nhận</button>
+            </div>
+        </form>
+    </div>
+
     <div id="toast" class="hidden fixed bottom-6 right-6 z-[60] px-4 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-100 shadow-xl"></div>
 
     <script>
@@ -308,12 +363,18 @@
         const HISTORY_KEY = 'db-token-history';
 
         let tokens = [];
-        let sessionTokenRaw = '';
-        let sessionVisible = false;
+        let revealedKey = '';      // API key đầy đủ: chỉ có ngay sau khi tạo hoặc sau khi nhập mật khẩu
+        let revealedUUID = '';
         let currentView = 'dashboard';
         let adjustingTokenId = null;
         let visibleTokens = new Set();
         let historyTokens = [];
+
+        function keyHint(key) {
+            if (!key) return '';
+            if (key.indexOf('•') >= 0) return key;
+            return key.length <= 8 ? '••••' : '••••' + key.slice(-4);
+        }
 
         function loadHistory() {
             try {
@@ -321,6 +382,68 @@
             } catch (e) {
                 historyTokens = [];
             }
+            // Bản cũ lưu key đầy đủ trong trình duyệt — chỉ giữ gợi ý.
+            let changed = false;
+            historyTokens.forEach(t => {
+                const h = keyHint(t.tokenKey);
+                if (h !== t.tokenKey) { t.tokenKey = h; changed = true; }
+            });
+            if (changed) saveHistory();
+        }
+
+        // Modal mật khẩu dùng chung. run(pw) trả {ok:true, value} hoặc {error}; sai thì giữ modal để nhập lại.
+        function withPassword(title, desc, run) {
+            return new Promise(resolve => {
+                const modal = document.getElementById('pw-modal');
+                const form = document.getElementById('pw-form');
+                const input = document.getElementById('pw-input');
+                const err = document.getElementById('pw-error');
+                const submit = document.getElementById('pw-submit');
+                document.getElementById('pw-title').textContent = title;
+                document.getElementById('pw-desc').textContent = desc;
+                input.value = '';
+                err.textContent = '';
+                modal.classList.remove('hidden');
+                input.focus();
+                const close = (val) => {
+                    modal.classList.add('hidden');
+                    input.value = '';
+                    form.removeEventListener('submit', onSubmit);
+                    document.getElementById('pw-cancel').removeEventListener('click', onCancel);
+                    resolve(val);
+                };
+                const onCancel = () => close(null);
+                const onSubmit = async (ev) => {
+                    ev.preventDefault();
+                    if (!input.value) { err.textContent = 'Nhập mật khẩu hệ thống.'; return; }
+                    submit.disabled = true;
+                    err.textContent = '';
+                    try {
+                        const r = await run(input.value);
+                        if (r && r.ok) { close(r.value); return; }
+                        err.textContent = (r && r.error) || 'Lỗi';
+                        input.select();
+                    } catch (e) {
+                        err.textContent = e.message;
+                    } finally {
+                        submit.disabled = false;
+                    }
+                };
+                form.addEventListener('submit', onSubmit);
+                document.getElementById('pw-cancel').addEventListener('click', onCancel);
+            });
+        }
+
+        function revealSecret(what, title, desc) {
+            return withPassword(title, desc, async (pw) => {
+                const res = await fetch('/api/drone/reveal', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ what: what, password: pw })
+                });
+                const data = await res.json().catch(() => ({}));
+                return res.ok ? { ok: true, value: data.value } : { error: data.message || ('Lỗi HTTP ' + res.status) };
+            });
         }
 
         function saveHistory() {
@@ -343,16 +466,18 @@
         }
 
         function apiStatusToToken(data) {
-            if (!data || !data.has_active_key || !data.api_key) return null;
+            if (!data || !data.has_active_key) return null;
             const connected = data.status === 'connected';
+            const hint = data.api_key_hint || '••••';
+            if (revealedKey && keyHint(revealedKey) !== hint) revealedKey = '';
             return {
                 id: 'current',
-                tokenKey: data.api_key,
+                tokenKey: hint,
                 createdAt: data.created_at || new Date().toISOString(),
                 expiresAt: data.expires_at || new Date().toISOString(),
                 status: 'active',
                 lastState: connected ? 'connected' : 'pending',
-                connectedUser: data.username || (connected && data.user_uuid ? data.user_uuid.substring(0, 8) + '…' : null),
+                connectedUser: data.username || (connected && data.user_uuid ? data.user_uuid : null),
             };
         }
 
@@ -378,19 +503,6 @@
             loadSession();
         }
 
-        function renderSessionToken() {
-            const el = document.getElementById('session-token');
-            const btn = document.getElementById('session-reveal');
-            if (!el) return;
-            if (!sessionTokenRaw) {
-                el.textContent = '—';
-                if (btn) btn.classList.add('hidden');
-                return;
-            }
-            if (btn) btn.classList.remove('hidden');
-            el.textContent = sessionVisible ? sessionTokenRaw : maskKey(sessionTokenRaw);
-            if (btn) btn.textContent = sessionVisible ? 'Ẩn' : 'Hiện';
-        }
 
         async function loadSession() {
             const badge = document.getElementById('session-badge');
@@ -398,15 +510,14 @@
             try {
                 const res = await fetch('/api/v1/drone/session', { cache: 'no-store' });
                 const data = await res.json();
-                const ok = !!(res.ok && data.authenticated && data.token);
+                const ok = !!(res.ok && data.authenticated);
                 document.getElementById('session-status').textContent = data.status || (ok ? 'Authenticated' : 'Chưa xác thực');
                 document.getElementById('session-ip').textContent = data.local_ip || '—';
-                document.getElementById('session-uuid').textContent = data.drone_uuid || '—';
+                if (!revealedUUID) document.getElementById('session-uuid').textContent = data.drone_uuid || '—';
                 document.getElementById('session-expires').textContent = data.expires_at
                     ? formatDate(data.expires_at) + ' · ' + getTimeRemaining(data.expires_at)
                     : '—';
-                sessionTokenRaw = ok ? data.token : '';
-                renderSessionToken();
+                document.getElementById('session-token').textContent = (ok && data.token_hint) || '—';
                 if (ok) {
                     badge.textContent = 'Đang hoạt động';
                     badge.className = 'text-xs px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-400';
@@ -420,6 +531,228 @@
                 badge.textContent = 'Lỗi';
                 document.getElementById('session-status').textContent = e.message;
             }
+        }
+
+        const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+        let identity = null;
+        let reregDirty = false;
+        let reregTimer = null;
+        let reregPrevStart = null;
+        let reregDeadline = 0;
+
+        function randomUUIDv4() {
+            // crypto.randomUUID chỉ có trên HTTPS/localhost; dashboard thường chạy http trong LAN.
+            const b = crypto.getRandomValues(new Uint8Array(16));
+            b[6] = (b[6] & 0x0f) | 0x40;
+            b[8] = (b[8] & 0x3f) | 0x80;
+            const h = Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+            return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20);
+        }
+
+        function setReregStatus(kind, text, log) {
+            const el = document.getElementById('rereg-status');
+            const pre = document.getElementById('rereg-log');
+            if (!el) return;
+            const color = { ok: 'text-emerald-400', err: 'text-red-400', run: 'text-cyan-300', warn: 'text-amber-400' }[kind] || 'text-slate-400';
+            el.className = 'text-sm mt-3 ' + color;
+            el.textContent = text || '';
+            el.classList.toggle('hidden', !text);
+            if (pre) {
+                pre.textContent = log || '';
+                pre.classList.toggle('hidden', !log);
+            }
+        }
+
+        function setReregBusy(busy) {
+            const btn = document.getElementById('rereg-submit');
+            if (btn) {
+                btn.disabled = busy;
+                btn.textContent = busy ? 'Đang đăng ký…' : 'Đăng ký lại';
+            }
+        }
+
+        function renderIdentity() {
+            const info = document.getElementById('rereg-identity');
+            const input = document.getElementById('rereg-uuid');
+            if (!identity) return;
+            if (input) {
+                input.placeholder = identity.has_uuid
+                    ? 'Để trống = giữ UUID hiện tại (' + identity.uuid_masked + ')'
+                    : 'Chưa có UUID — nhập hoặc bấm «UUID mới»';
+            }
+            if (info) {
+                const parts = [identity.uuid_masked || 'chưa có UUID'];
+                if (identity.registered) parts.push('đã đăng ký');
+                else if (identity.has_secret) parts.push('secret thuộc UUID khác (' + (identity.secret_uuid_masked || '?') + ')');
+                else parts.push('chưa đăng ký');
+                if (identity.restart_needed) parts.push('cần khởi động lại dịch vụ');
+                info.textContent = parts.join(' · ');
+                info.className = 'text-[11px] font-mono break-all ' + (identity.registered ? 'text-slate-500' : 'text-amber-400');
+            }
+            renderVehicle(identity.vehicle);
+        }
+
+        function renderVehicle(v) {
+            const alert = document.getElementById('rereg-vehicle-alert');
+            const sel = document.getElementById('rereg-vtype');
+            if (!v || !alert || !sel) return;
+            const auto = sel.querySelector('option[value="auto"]');
+            auto.textContent = v.live_type
+                ? 'Theo PX4 — ' + v.live_label + ' (' + v.live_type + ')' + (v.live_supported ? '' : ', server chưa hỗ trợ')
+                : 'Theo PX4 (chưa có heartbeat — giữ loại trong config)';
+            if (v.switch_needed) {
+                alert.textContent = 'PX4 đang báo ' + v.live_label + ' (type ' + v.live_type + '), server đang giữ hồ sơ ' +
+                    v.registered_label + ' (type ' + v.registered_type + '). Nhấn Đăng ký lại để server chuyển giao diện.';
+                alert.classList.remove('hidden');
+            } else {
+                alert.textContent = '';
+                alert.classList.add('hidden');
+            }
+        }
+
+        function renderReregState(st, fresh) {
+            if (!st) return false;
+            if (st.state === 'running') {
+                setReregBusy(true);
+                setReregStatus('run', st.message);
+                return false;
+            }
+            setReregBusy(false);
+            if (!fresh) return true;
+            if (st.state === 'ok') setReregStatus('ok', st.message);
+            else setReregStatus('err', st.message, st.log);
+            return true;
+        }
+
+        async function loadIdentity() {
+            try {
+                const res = await fetch('/api/drone/identity', { cache: 'no-store' });
+                if (!res.ok) return null;
+                identity = await res.json();
+            } catch (e) {
+                return null;
+            }
+            renderIdentity();
+            return identity;
+        }
+
+        function stopReregPoll() {
+            if (reregTimer) clearInterval(reregTimer);
+            reregTimer = null;
+        }
+
+        function startReregPoll(prevStart) {
+            stopReregPoll();
+            reregPrevStart = prevStart;
+            reregDeadline = Date.now() + 4 * 60 * 1000;
+            reregTimer = setInterval(pollRereg, 2000);
+        }
+
+        async function pollRereg() {
+            if (Date.now() > reregDeadline) {
+                stopReregPoll();
+                setReregBusy(false);
+                setReregStatus('warn', 'Quá 4 phút chưa có kết quả — kiểm tra data/logs/reregister.log trên drone.');
+                return;
+            }
+            const id = await loadIdentity();
+            if (!id) {
+                setReregStatus('run', 'DroneBridge đang khởi động lại…');
+                return;
+            }
+            const st = id.reregister;
+            if (!st || st.started_at === reregPrevStart) return;
+            if (renderReregState(st, true)) {
+                stopReregPoll();
+                if (st.state === 'ok') {
+                    reregDirty = false;
+                    renderIdentity();
+                    loadSession();
+                }
+            }
+        }
+
+        async function submitRereg(ev) {
+            ev.preventDefault();
+            const input = document.getElementById('rereg-uuid');
+            const pwEl = document.getElementById('rereg-password');
+            const uuid = (input.value || '').trim().toLowerCase();
+            if (uuid === '' && !(identity && identity.has_uuid)) {
+                setReregStatus('err', 'Chưa có UUID trong config — nhập UUID hoặc bấm «UUID mới».');
+                input.focus();
+                return;
+            }
+            if (uuid !== '' && !UUID_RE.test(uuid)) {
+                setReregStatus('err', 'UUID không hợp lệ (dạng xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx, chữ số hex).');
+                input.focus();
+                return;
+            }
+            if (!pwEl.value) {
+                setReregStatus('err', 'Nhập mật khẩu hệ thống.');
+                pwEl.focus();
+                return;
+            }
+            if (uuid !== '' && identity && identity.has_uuid &&
+                !confirm('Đổi UUID ' + identity.uuid_masked + ' → ' + uuid + ' và đăng ký lại?\nDrone sẽ xác thực với server bằng UUID mới.')) {
+                return;
+            }
+            const vtype = document.getElementById('rereg-vtype').value;
+            const prevStart = identity && identity.reregister ? identity.reregister.started_at : null;
+            setReregBusy(true);
+            setReregStatus('run', 'Đang gửi yêu cầu…');
+            try {
+                const res = await fetch('/api/drone/reregister', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(Object.assign({ uuid: uuid, password: pwEl.value },
+                        vtype === 'auto' ? {} : { vehicle_type: parseInt(vtype, 10) }))
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    setReregBusy(false);
+                    setReregStatus('err', data.message || ('Lỗi HTTP ' + res.status));
+                    if (res.status === 401) pwEl.select();
+                    return;
+                }
+                pwEl.value = '';
+                setReregStatus('run', data.message || 'Đang đăng ký lại…');
+                startReregPoll(prevStart);
+            } catch (e) {
+                setReregBusy(false);
+                setReregStatus('err', 'Không gửi được yêu cầu: ' + e.message);
+            }
+        }
+
+        async function initRereg() {
+            const form = document.getElementById('rereg-form');
+            if (!form) return;
+            form.addEventListener('submit', submitRereg);
+            const input = document.getElementById('rereg-uuid');
+            input.addEventListener('input', function () { reregDirty = true; });
+            document.getElementById('rereg-random').addEventListener('click', function () {
+                input.value = randomUUIDv4();
+                reregDirty = true;
+            });
+            document.getElementById('rereg-current').addEventListener('click', function () {
+                input.value = '';
+                reregDirty = false;
+            });
+            window.addEventListener('message', function (ev) {
+                if (ev.origin !== location.origin || !ev.data || ev.data.type !== 'focus-reregister') return;
+                form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                document.getElementById('rereg-password').focus();
+            });
+            const id = await loadIdentity();
+            const st = id && id.reregister;
+            if (st && st.state === 'running') {
+                renderReregState(st, true);
+                startReregPoll(null);
+            } else if (st && st.state === 'failed' && st.finished_at &&
+                Date.now() - Date.parse(st.finished_at) < 10 * 60 * 1000) {
+                renderReregState(st, true);
+            }
+            // Loại PX4 đổi (đổi airframe) khi trang đang mở → cập nhật cảnh báo.
+            setInterval(function () { if (!reregTimer) loadIdentity(); }, 5000);
         }
 
         function updateCreateButton() {
@@ -580,7 +913,7 @@
             
             activeTokens.forEach(token => {
                 const isVisible = visibleTokens.has(token.id);
-                const displayKey = isVisible ? token.tokenKey : maskKey(token.tokenKey);
+                const displayKey = isVisible && revealedKey ? revealedKey : token.tokenKey;
                 
                 html += `
                     <tr class="group hover:bg-slate-800/20 transition-colors">
@@ -598,7 +931,7 @@
                                                 '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>'
                                             }
                                         </button>
-                                        <button onclick="copyToClipboard('${token.tokenKey}')" class="text-slate-600 hover:text-cyan-400 transition-colors ml-1" title="Copy">
+                                        <button onclick="copyCurrentKey()" class="text-slate-600 hover:text-cyan-400 transition-colors ml-1" title="Copy">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
                                         </button>
                                     </div>
@@ -700,7 +1033,7 @@
                     html += `
                         <tr class="hover:bg-slate-800/30 transition-colors">
                             <td class="p-4 pl-6">
-                                <span class="font-mono text-xs text-slate-400">${token.tokenKey.substring(0, 24)}...</span>
+                                <span class="font-mono text-xs text-slate-400">${keyHint(token.tokenKey)}</span>
                             </td>
                             <td class="p-4">
                                 ${token.status === 'revoked' ? 
@@ -734,13 +1067,27 @@
         }
 
         // --- Actions ---
-        function toggleVisibility(id) {
+        async function ensureRevealedKey() {
+            if (revealedKey) return true;
+            const v = await revealSecret('api_key', 'Xem API key', 'API key là khóa truy cập drone. Nhập mật khẩu hệ thống để xem đầy đủ.');
+            if (!v) return false;
+            revealedKey = v;
+            return true;
+        }
+
+        async function toggleVisibility(id) {
             if (visibleTokens.has(id)) {
                 visibleTokens.delete(id);
             } else {
+                if (!(await ensureRevealedKey())) return;
                 visibleTokens.add(id);
             }
             renderActiveTokens();
+        }
+
+        async function copyCurrentKey() {
+            if (!(await ensureRevealedKey())) return;
+            copyToClipboard(revealedKey);
         }
 
         function copyToClipboard(text) {
@@ -781,6 +1128,7 @@
 
         function closeCreateModal() {
             document.getElementById('create-modal').classList.add('hidden');
+            document.getElementById('create-password').value = '';
         }
 
         async function handleCreateToken() {
@@ -792,10 +1140,16 @@
                 return;
             }
             const expirationHours = Math.max(1, Math.min(720, days * 24 + hours));
+            const pwEl = document.getElementById('create-password');
+            if (!pwEl.value) {
+                showToast('Nhập mật khẩu hệ thống để tạo key.', true);
+                pwEl.focus();
+                return;
+            }
 
             try {
                 const status = await fetchTokenStatus();
-                if (status.has_active_key && status.api_key) {
+                if (status.has_active_key) {
                     const old = tokens.find(t => t.id === 'current');
                     await revokeCurrentKey();
                     if (old) {
@@ -814,14 +1168,17 @@
                 const res = await fetch(API.request, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ expiration_hours: expirationHours }),
+                    body: JSON.stringify({ expiration_hours: expirationHours, password: pwEl.value }),
                 });
                 const data = await res.json();
                 if (!res.ok) {
                     showToast(parseApiError(data, 'Tạo token thất bại'), true);
+                    if (res.status === 401) { pwEl.select(); return; }
                     await loadTokens();
                     return;
                 }
+                pwEl.value = '';
+                revealedKey = data.api_key || '';
                 closeCreateModal();
                 visibleTokens.add('current');
                 showToast('Đã tạo API key mới');
@@ -887,13 +1244,23 @@
 
         function init() {
             loadHistory();
-            const reveal = document.getElementById('session-reveal');
-            if (reveal) {
-                reveal.addEventListener('click', function () {
-                    sessionVisible = !sessionVisible;
-                    renderSessionToken();
+            const uuidBtn = document.getElementById('session-uuid-reveal');
+            if (uuidBtn) {
+                uuidBtn.addEventListener('click', async function () {
+                    if (revealedUUID) {
+                        revealedUUID = '';
+                        uuidBtn.textContent = 'Hiện';
+                        loadSession();
+                        return;
+                    }
+                    const v = await revealSecret('uuid', 'Xem UUID drone', 'UUID là định danh của drone với server. Nhập mật khẩu hệ thống để xem đầy đủ.');
+                    if (!v) return;
+                    revealedUUID = v;
+                    document.getElementById('session-uuid').textContent = v;
+                    uuidBtn.textContent = 'Ẩn';
                 });
             }
+            initRereg();
             loadTokens();
             setView('dashboard');
             setInterval(loadTokens, 15000);

@@ -265,7 +265,7 @@ def _merge_dronebridge_api(
 
     uuid = str(auth_cfg.get("uuid") or "").strip()
     if uuid:
-        state.drone_name = uuid.split("-")[0][:12].upper()
+        state.drone_name = (uuid[:2] + ".." + uuid[-2:]).upper() if len(uuid) >= 8 else "DRONEBRIDGE"
 
     host = str(auth_cfg.get("host") or "")
     auth_port = auth_cfg.get("port")

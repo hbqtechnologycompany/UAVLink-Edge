@@ -147,6 +147,16 @@ func notePreflightHeartbeat(msg *common.MessageHeartbeat, mode string) {
 	preflight.mode = mode
 }
 
+// LivePX4VehicleType trả HEARTBEAT.type PX4 đang báo (ok=false khi mất heartbeat hoặc type=0).
+func LivePX4VehicleType() (uint8, bool) {
+	preflight.mu.Lock()
+	defer preflight.mu.Unlock()
+	if preflight.hbAt.IsZero() || time.Since(preflight.hbAt) > 5*time.Second || preflight.vehType == 0 {
+		return 0, false
+	}
+	return preflight.vehType, true
+}
+
 func notePreflightSys(msg *common.MessageSysStatus) {
 	if msg == nil {
 		return

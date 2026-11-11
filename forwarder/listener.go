@@ -2,9 +2,11 @@ package forwarder
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/bluenviron/gomavlib/v3"
 
@@ -39,6 +41,12 @@ func ensureEthernetReady(cfg *config.Config) error {
 	ifaceName, err := resolveEthernetInterface(cfg)
 	if err != nil {
 		return err
+	}
+
+	// setup_eth.sh hands the static IP to NetworkManager, which may finish after we start.
+	if cfg.Ethernet.LocalIP != "" && waitInterfaceIP(ifaceName, cfg.Ethernet.LocalIP, 10*time.Second) {
+		logger.Info("[NETWORK] Ethernet ready on %s with IP %s", ifaceName, cfg.Ethernet.LocalIP)
+		return nil
 	}
 
 	if err := bringInterfaceUp(ifaceName); err != nil {
@@ -84,7 +92,40 @@ func resolveEthernetInterface(cfg *config.Config) (string, error) {
 }
 
 func bringInterfaceUp(ifaceName string) error {
+	if iface, err := net.InterfaceByName(ifaceName); err == nil && iface.Flags&net.FlagUp != 0 {
+		return nil
+	}
 	return runIPCommand("link", "set", "dev", ifaceName, "up")
+}
+
+func interfaceHasIP(ifaceName, ip string) bool {
+	iface, err := net.InterfaceByName(ifaceName)
+	if err != nil {
+		return false
+	}
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return false
+	}
+	for _, a := range addrs {
+		if ipNet, ok := a.(*net.IPNet); ok && ipNet.IP.String() == ip {
+			return true
+		}
+	}
+	return false
+}
+
+func waitInterfaceIP(ifaceName, ip string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if interfaceHasIP(ifaceName, ip) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 func runIPCommand(args ...string) error {
@@ -95,7 +136,7 @@ func runIPCommand(args ...string) error {
 	}
 
 	if os.Geteuid() != 0 {
-		sudoArgs := append([]string{"ip"}, args...)
+		sudoArgs := append([]string{"-n", "ip"}, args...)
 		cmd = exec.Command("sudo", sudoArgs...)
 		output, err = cmd.CombinedOutput()
 	}
@@ -191,7 +232,9 @@ func buildListenerEndpoints(cfg *config.Config) ([]gomavlib.EndpointConf, error)
 		if err := addSerial("TELEM2", telem2Dev, telem2Baud); err != nil {
 			logger.Warn("[MAVLINK] TELEM2 backup not opened: %v", err)
 		}
-		if err := addSerial("TELEM3", telem3Dev, telem3Baud); err != nil {
+		if telem3Dev == "" {
+			logger.Info("[MAVLINK] TELEM3 not wired on board %s — skipped", cfg.Hardware.Name)
+		} else if err := addSerial("TELEM3", telem3Dev, telem3Baud); err != nil {
 			logger.Warn("[MAVLINK] TELEM3 backup not opened: %v", err)
 		}
 	default:

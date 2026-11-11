@@ -12,9 +12,9 @@ from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lcd import DRIVER_ID, display_image, open_display
+from lcd import DRIVER_ID, default_bus, display_image, open_display
 
-I2C_BUS = 3
+I2C_BUS = default_bus()
 DEFAULT_ADDR = 0x3C
 
 

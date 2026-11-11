@@ -21,6 +21,7 @@
 11. [Cấu hình](#11-cấu-hình)
 12. [Bản đồ file](#12-bản-đồ-file)
 13. [Tài liệu liên quan](#13-tài-liệu-liên-quan)
+14. [Board CM5 / CM2 và phân loại dữ liệu](#14-board-cm5--cm2-và-phân-loại-dữ-liệu)
 
 ---
 
@@ -565,3 +566,50 @@ Pi_CM5_DroneBridgeService/
 
 - Web UI (`connect.html`) vẫn gọi API legacy `/api/network/priority`, `/api/network/switch` trỏ tới CLI `connection_manager.py priority|once` — **CLI này không còn trong v2.0**. Chế độ thực tế điều khiển qua `config.yaml` → `network.mode`.
 - Dashboard (`/api/status`) kỳ vọng `network_type` / `network_speed` nhưng backend chưa populate — UI có thể hiển thị "Unknown".
+
+---
+
+## 14. Board CM5 / CM2 và phân loại dữ liệu
+
+### 14.1 Board profile
+
+Một mã nguồn chạy cho cả Raspberry Pi CM5 và WalnutPi CM2. Board lấy từ khóa `board:` trong
+`config.yaml` (`auto` | `cm5` | `walnutpi`); `auto` đọc `/proc/device-tree/compatible`.
+
+| | CM5 (`rpi`) | CM2 (`walnutpi`) |
+|---|---|---|
+| Ethernet | `end0` | `eth0` |
+| TELEM2 | `/dev/ttyAMA2` | `/dev/ttyS2` (J23 chân 4/5) |
+| TELEM3 | `/dev/ttyAMA3` | không có |
+| LCD I2C | bus 3, overlay `i2c3-pi5`, `pins_22_23` | bus 4, overlay `i2c4` |
+| GPIO nguồn 4G | có | bỏ qua (module tự bật nguồn) |
+
+`config.Load` thay giá trị mặc định của board kia bằng giá trị của board đang chạy, và
+`Config.Save` ghi lại giá trị đã đổi. Mọi nơi đọc config phải dùng cùng quy tắc:
+Go (`config/board.go`), bash (`install/lib/board.sh`: `dronebridge_board`,
+`dronebridge_config_lcd_bus`), Python (`lcd_monitor/lcd/driver.py`: `resolve_bus`).
+Nhờ vậy cùng một `config.yaml` copy qua board kia vẫn chạy được.
+
+Dashboard lấy board từ `GET /api/system/board` (cũng có trong `/api/status` → `board`);
+header và các trang con hiển thị nhãn `CM5` / `CM2` theo board thực tế.
+
+### 14.2 Phân loại dữ liệu
+
+| Loại | Ví dụ | Hiển thị / log |
+|---|---|---|
+| Bí mật | `shared_secret`, `secret_key` (`.drone_secret`), session token, API key, mật khẩu, khóa VPN | Không bao giờ trả qua API đọc, không ghi log đầy đủ; chỉ gợi ý `••••abcd` |
+| Định danh | UUID drone, `publish_path` camera | Chỉ giữ 2 ký tự đầu và 2 ký tự cuối (`9f••••55`) trong API, UI, log và LCD; xem đầy đủ cần mật khẩu hệ thống |
+| Công khai | board, nhiệt độ, trạng thái link, IP Ethernet | Hiển thị bình thường |
+
+Hàm che nằm ở package `redact`; `logger` và `metrics.AddLog` tự che UUID trong mọi dòng log.
+`config.yaml` và `.drone_secret` ghi với quyền `0600`.
+
+Dashboard chưa có đăng nhập, nên các thao tác nhạy cảm đòi mật khẩu hệ thống (kiểm bằng `sudo -S -k`);
+sai 5 lần từ một IP thì khóa IP đó 5 phút (HTTP 429):
+
+| API | Việc |
+|---|---|
+| `POST /api/drone/reveal` `{what: "uuid"\|"api_key", password}` | Xem UUID / API key đầy đủ |
+| `POST /api/drone/reregister` `{uuid?, password}` | Đăng ký lại (để trống `uuid` = giữ UUID hiện tại) |
+| `POST /api/v1/drone/api-key/request` `{expiration_hours?, password}` | Tạo API key (key đầy đủ trả về một lần) |
+| `POST /api/host/power` `{action, password}` | Reboot / tắt nguồn |

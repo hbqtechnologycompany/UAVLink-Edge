@@ -14,3 +14,22 @@ const (
 )
 
 const MaxRegisterModelLen = 32
+
+// SupportedVehicleType: server có hardware_profile riêng cho loại này.
+func SupportedVehicleType(t uint8) bool {
+	switch t {
+	case VehicleTypeFixedWing, VehicleTypeQuadrotor, VehicleTypeHelicopter, VehicleTypeGroundRover,
+		VehicleTypeSubmarine, VehicleTypeHexarotor, VehicleTypeOctorotor, VehicleTypeVTOLFixedRotor:
+		return true
+	}
+	return false
+}
+
+// ServerVehicleType là loại server lưu cho vehicle_type đã gửi lúc đăng ký:
+// 0 (gói v1, không trailer) và loại không hỗ trợ đều thành quadrotor.
+func ServerVehicleType(sent uint8) uint8 {
+	if SupportedVehicleType(sent) {
+		return sent
+	}
+	return VehicleTypeQuadrotor
+}

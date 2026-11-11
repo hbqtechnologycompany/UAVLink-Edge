@@ -49,16 +49,16 @@
             status: {
                 system: 'Hệ thống', px4: 'PX4', auth: 'Xác thực',
                 network: 'Mạng', mavlink: 'MAVLink', ip: 'IP', uptime: 'Uptime',
-                cm5: 'CM5', fan: 'Quạt'
+                cm5: '{board}', fan: 'Quạt'
             },
             power: {
                 register: 'Đăng ký lại', reboot: 'Reboot', off: 'Tắt nguồn',
                 password: 'Mật khẩu hệ thống', cancel: 'Hủy', confirm: 'Xác nhận',
                 registerTitle: 'Đăng ký lại DroneBridge',
                 registerDesc: 'Lệnh đăng ký sẽ chạy lại trên thiết bị và khởi động service sau khi hoàn tất. Chỉ nhập mật khẩu hệ thống một lần, mật khẩu không được lưu.',
-                rebootTitle: 'Khởi động lại CM5',
+                rebootTitle: 'Khởi động lại {board}',
                 rebootDesc: 'Máy sẽ reboot. Chỉ nhập mật khẩu hệ thống một lần, mật khẩu không được lưu.',
-                offTitle: 'Tắt nguồn CM5',
+                offTitle: 'Tắt nguồn {board}',
                 offDesc: 'Máy sẽ tắt. Chỉ nhập mật khẩu hệ thống một lần, mật khẩu không được lưu.'
             },
             val: {
@@ -100,16 +100,16 @@
             status: {
                 system: 'System', px4: 'PX4', auth: 'Auth',
                 network: 'Network', mavlink: 'MAVLink', ip: 'IP', uptime: 'Uptime',
-                cm5: 'CM5', fan: 'Fan'
+                cm5: '{board}', fan: 'Fan'
             },
             power: {
                 register: 'Register again', reboot: 'Reboot', off: 'Power off',
                 password: 'System password', cancel: 'Cancel', confirm: 'Confirm',
                 registerTitle: 'Re-register DroneBridge',
                 registerDesc: 'The registration flow will rerun on the device and the service will restart afterward. Enter the system password once. It is not stored.',
-                rebootTitle: 'Reboot CM5',
+                rebootTitle: 'Reboot {board}',
                 rebootDesc: 'The board will reboot. Enter the system password once. It is not stored.',
-                offTitle: 'Power off CM5',
+                offTitle: 'Power off {board}',
                 offDesc: 'The board will power off. Enter the system password once. It is not stored.'
             },
             val: {
@@ -170,6 +170,7 @@
     var currentView = DEFAULT_VIEW;
     var sidebarEl, backdropEl, frames = {};
     var lastStatus = null;
+    var board = null; // /api/status → board: {id, label, name, soc, model}
 
     function t(key) {
         var parts = key.split('.');
@@ -178,7 +179,32 @@
             if (!obj) return key;
             obj = obj[parts[i]];
         }
+        if (typeof obj === 'string') return obj.replace('{board}', board ? board.label : 'Board');
         return obj || key;
+    }
+
+    function applyBoard(next) {
+        if (!next || !next.label || (board && board.id === next.id)) return;
+        board = next;
+        document.documentElement.setAttribute('data-board', board.id);
+        var el = document.getElementById('sidebar-board');
+        if (el) {
+            el.textContent = board.name + (board.soc ? ' · ' + board.soc : '');
+            el.title = board.model || '';
+        }
+        applyStaticText();
+        syncBoardToFrames();
+    }
+
+    function syncBoardToFrames() {
+        if (!board) return;
+        Object.keys(frames).forEach(function (k) {
+            var iframe = frames[k];
+            if (!iframe || !iframe.contentWindow) return;
+            try {
+                iframe.contentWindow.postMessage({ type: 'db-board', board: board }, location.origin);
+            } catch (e) { /* ignore */ }
+        });
     }
 
     function allNavItems() {
@@ -334,7 +360,7 @@
         iframe.className = 'content-frame';
         iframe.title = t('nav.' + viewId);
         iframe.src = item.src + (item.src.indexOf('?') >= 0 ? '&' : '?') + 'embed=1&shellTheme=' + encodeURIComponent(theme);
-        iframe.addEventListener('load', function () { syncThemeToFrames(theme); });
+        iframe.addEventListener('load', function () { syncThemeToFrames(theme); syncBoardToFrames(); });
         iframe.setAttribute('loading', 'lazy');
         document.getElementById('frame-container').appendChild(iframe);
         frames[viewId] = iframe;
@@ -357,8 +383,21 @@
         if (dot) dot.className = 'status-dot ' + (state || '');
     }
 
+    // PX4 đổi airframe (vd. quad → rover) mà server còn giữ hồ sơ cũ → nhắc đăng ký lại.
+    function applyVehicleProfile(vp) {
+        var btn = document.getElementById('btn-register');
+        if (!btn) return;
+        var need = !!(vp && vp.switch_needed);
+        btn.classList.toggle('attention', need);
+        btn.title = need
+            ? 'PX4 đang báo ' + vp.live_label + ', server còn hồ sơ ' + vp.registered_label + ' — đăng ký lại để đổi giao diện'
+            : '';
+    }
+
     function updateStatusPills(data) {
         lastStatus = data;
+        applyBoard(data.board);
+        applyVehicleProfile(data.vehicle_profile);
         var v = I18N[lang].val;
         var authOk = data.server_reachable || data.auth_status === 'Authenticated';
         setPill('pill-system', v.online, 'ok');
@@ -382,7 +421,7 @@
             if (h.undervoltage_now) { text += ' · ' + v.underVolt; state = 'err'; }
             else if (h.throttled_now) { text += ' · ' + v.throttling; if (state === 'ok') state = 'warn'; }
             setPill('pill-cm5', text, state);
-            var tip = [v.tempTip + ': ' + text];
+            var tip = [(board ? board.name + (board.soc ? ' (' + board.soc + ')' : '') + ' — ' : '') + v.tempTip + ': ' + text];
             if (h.throttled_raw) tip.push('get_throttled = ' + h.throttled_raw);
             if (h.undervoltage_since_boot) tip.push('⚠ ' + v.underVolt + ' (boot)');
             if (h.temp_limit_since_boot) tip.push('⚠ ' + v.throttling + ' (boot)');
@@ -519,7 +558,17 @@
             input.focus();
         }
 
-        document.getElementById('btn-register').addEventListener('click', function () { openAuth('register'); });
+        // Đăng ký lại (đổi UUID được) nằm trong trang Tokens, nút header chỉ mở form đó.
+        document.getElementById('btn-register').addEventListener('click', function () {
+            navigate('tokens');
+            var frame = frames.tokens;
+            if (!frame) return;
+            var focusForm = function () {
+                if (frame.contentWindow) frame.contentWindow.postMessage({ type: 'focus-reregister' }, location.origin);
+            };
+            focusForm();
+            frame.addEventListener('load', focusForm, { once: true });
+        });
         document.getElementById('btn-reboot').addEventListener('click', function () { openAuth('reboot'); });
         document.getElementById('btn-poweroff').addEventListener('click', function () { openAuth('poweroff'); });
         document.getElementById('host-auth-cancel').addEventListener('click', closeAuth);

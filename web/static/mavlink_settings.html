@@ -237,8 +237,8 @@
                         <div class="radio-label">
                             <span>🌐</span>
                             <div>
-                                <div>ETH → TELEM2 → TELEM3</div>
-                                <div class="form-description">Ethernet trước. Mất heartbeat PX4 khoảng 2 giây thì sang TELEM2, rồi TELEM3. Lệnh chỉ đi một kênh.</div>
+                                <div id="failover-title">ETH → TELEM2 → TELEM3</div>
+                                <div class="form-description" id="failover-desc">Ethernet trước. Mất heartbeat PX4 khoảng 2 giây thì sang TELEM2, rồi TELEM3. Lệnh chỉ đi một kênh.</div>
                             </div>
                         </div>
                     </label>
@@ -268,9 +268,9 @@
             <div id="ethernet-settings">
                 <h3 style="margin: 1.5rem 0 1rem; color: var(--text-secondary);">Ethernet Settings</h3>
                 <div class="form-group">
-                    <label class="form-label">CM5 Local IP</label>
+                    <label class="form-label"><span class="db-board">CM5</span> Local IP</label>
                     <input type="text" class="form-input" id="eth_local_ip" placeholder="10.41.10.10">
-                    <div class="form-description">IP tĩnh CM5 trên cổng Ethernet — đổi được theo mạng của bạn (mặc định 10.41.10.10)</div>
+                    <div class="form-description">IP tĩnh <span class="db-board">CM5</span> trên cổng Ethernet — đổi được theo mạng của bạn (mặc định 10.41.10.10)</div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Pixhawk IP</label>
@@ -290,16 +290,16 @@
                     <input type="text" class="form-input" id="eth_subnet" placeholder="24">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Local Listen Port (PX4 → CM5)</label>
+                    <label class="form-label">Local Listen Port (PX4 → <span class="db-board">CM5</span>)</label>
                     <input type="number" class="form-input" id="local_listen_port" value="14550">
-                    <div class="form-description">Port CM5 lắng nghe UDP từ PX4 — khớp MAV_0_REMOTE_PRT trên PX4 (mặc định 14550). PX4 thường 10.41.10.2 gửi tới 10.41.10.10:14550.</div>
+                    <div class="form-description">Port <span class="db-board">CM5</span> lắng nghe UDP từ PX4 — khớp MAV_0_REMOTE_PRT trên PX4 (mặc định 14550). PX4 thường 10.41.10.2 gửi tới 10.41.10.10:14550.</div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Pixhawk Port</label>
                     <input type="number" class="form-input" id="eth_pixhawk_port" value="14550">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Cloud Target Port (CM5 → Server)</label>
+                    <label class="form-label">Cloud Target Port (<span class="db-board">CM5</span> → Server)</label>
                     <input type="number" class="form-input" id="target_port" value="14550" readonly>
                     <div class="form-description">Chỉ đọc — MAVLink gửi lên Hybrid Router qua VPN (10.8.0.1:14550)</div>
                 </div>
@@ -308,12 +308,13 @@
             <div id="serial-settings">
                 <h3 style="margin: 1.5rem 0 1rem; color: var(--text-secondary);">Serial Settings</h3>
                 <div class="form-group">
-                    <label class="form-label">UART Preset (CM5 / Pi5)</label>
+                    <label class="form-label">UART Preset (CM5 / WalnutPi CM2)</label>
                     <select class="form-select" id="uart_preset" onchange="applyUartPreset()">
                         <option value="custom">Tùy chỉnh</option>
                         <option value="/dev/ttyAMA0">UART0 — /dev/ttyAMA0</option>
                         <option value="/dev/ttyAMA1">UART1 — /dev/ttyAMA1 (GPIO 8–11)</option>
                         <option value="/dev/ttyAMA2">UART2 / TELEM2 — /dev/ttyAMA2 (GPIO 4–7)</option>
+                        <option value="/dev/ttyS2">WalnutPi CM2 TELEM2 — /dev/ttyS2 (J23 chân 4/5)</option>
                         <option value="/dev/serial0">serial0 (alias UART0)</option>
                         <option value="/dev/ttyUSB0">USB — /dev/ttyUSB0</option>
                         <option value="/dev/ttyACM0">USB ACM — /dev/ttyACM0</option>
@@ -322,7 +323,7 @@
                 <div class="form-group">
                     <label class="form-label">Serial Port</label>
                     <input type="text" class="form-input" id="serial_port" value="/dev/ttyAMA2" placeholder="/dev/ttyAMA2" oninput="syncUartPreset()">
-                    <div class="form-description">TELEM2 và TELEM3 đều 1500000 8N1, không flow control, cùng bộ bản tin Normal với Ethernet. UART2: TX4 RX5 CTS6 RTS7, /dev/ttyAMA2. UART3: TX8 RX9 CTS10 RTS11, /dev/ttyAMA3.</div>
+                    <div class="form-description">TELEM2 và TELEM3 đều 1500000 8N1, không flow control, cùng bộ bản tin Normal với Ethernet. UART2: TX4 RX5 CTS6 RTS7, /dev/ttyAMA2. UART3: TX8 RX9 CTS10 RTS11, /dev/ttyAMA3. WalnutPi CM2: chỉ TELEM2 = UART2 /dev/ttyS2 (J23 chân 4 TX, chân 5 RX), không có TELEM3.</div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Baud Rate (legacy)</label>
@@ -351,7 +352,7 @@
     </div>
 
     <script>
-        const UART_PRESETS = ['/dev/ttyAMA0', '/dev/ttyAMA1', '/dev/ttyAMA2', '/dev/serial0', '/dev/ttyUSB0', '/dev/ttyACM0'];
+        const UART_PRESETS = ['/dev/ttyAMA0', '/dev/ttyAMA1', '/dev/ttyAMA2', '/dev/ttyS2', '/dev/serial0', '/dev/ttyUSB0', '/dev/ttyACM0'];
 
         function cfgSection(config, snake, pascal) {
             return config[snake] || config[pascal] || {};
@@ -430,8 +431,16 @@
                         cfgVal(net, 'local_listen_port', 'LocalListenPort', 14550);
                     document.getElementById('target_port').value =
                         cfgVal(net, 'target_port', 'TargetPort', 14550);
+                    const board = data.board || {};
+                    if (board.telem2_port) document.getElementById('serial_port').placeholder = board.telem2_port;
+                    if (board.id && !board.telem3_port) {
+                        document.getElementById('failover-title').textContent = 'ETH → TELEM2';
+                        document.getElementById('failover-desc').textContent =
+                            'Ethernet trước. Mất heartbeat PX4 khoảng 2 giây thì sang TELEM2 (' +
+                            (board.label || 'board') + ' không có TELEM3). Lệnh chỉ đi một kênh.';
+                    }
                     document.getElementById('serial_port').value =
-                        cfgVal(net, 'serial_port', 'SerialPort', '/dev/ttyAMA2');
+                        cfgVal(net, 'serial_port', 'SerialPort', board.telem2_port || '/dev/ttyAMA2');
                     syncUartPreset();
                     document.getElementById('serial_baud').value =
                         cfgVal(net, 'serial_baud', 'SerialBaud', 1500000);
@@ -443,7 +452,7 @@
                     document.getElementById('eth_broadcast_ip').value =
                         cfgVal(eth, 'broadcast_ip', 'BroadcastIP', '10.41.10.255');
                     document.getElementById('eth_interface').value =
-                        cfgVal(eth, 'interface', 'Interface', 'eth0');
+                        cfgVal(eth, 'interface', 'Interface', board.eth_iface || '');
                     document.getElementById('eth_subnet').value =
                         cfgVal(eth, 'subnet', 'Subnet', '24');
                     document.getElementById('eth_pixhawk_port').value =

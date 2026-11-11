@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DroneBridge — Control Center</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link href="app-shell.css" rel="stylesheet">
+    <link href="app-shell.css?v=vehicle1" rel="stylesheet">
 </head>
 <body>
     <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
@@ -23,6 +23,7 @@
                 <div class="sidebar-brand-text">
                     <h1>DroneBridge</h1>
                     <span data-i18n="brandSub">PX4 Control Center</span>
+                    <span class="sidebar-board" id="sidebar-board"></span>
                 </div>
             </div>
 
@@ -76,7 +77,7 @@
                     </div>
                     <div class="status-pill" id="pill-cm5">
                         <span class="status-dot"></span>
-                        <span class="label" data-i18n="status.cm5">CM5</span>
+                        <span class="label" data-i18n="status.cm5">Board</span>
                         <span class="value">—</span>
                     </div>
                     <div class="status-pill" id="pill-fan">
@@ -156,6 +157,6 @@
         </form>
     </div>
 
-    <script src="app-shell.js?v=preflight3d4"></script>
+    <script src="app-shell.js?v=vehicle1"></script>
 </body>
 </html>

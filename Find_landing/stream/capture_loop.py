@@ -69,14 +69,25 @@ def run_capture_loop(streamer, pipe_write_fd: int):
     low_fps_streak = 0
     encode_drops_at_last_stats = 0
 
+    full_since = None
+
     try:
         while streamer.running.is_set():
-            # Drain sensor nhanh khi encoder đầy — không throttle 30fps
+            # Drain sensor only when the encoder stays full for a whole frame interval:
+            # the writer thread usually takes the frame within ms, and drain() blocks
+            # until the next sensor frame on V4L2 backends (dropping every other frame).
             if encoder.is_full():
+                now = time.time()
+                if full_since is None:
+                    full_since = now
+                if now - full_since < fps_interval:
+                    time.sleep(0.001)
+                    continue
                 if source.drain():
                     encode_drops += 1
-                time.sleep(0.001)
+                full_since = None
                 continue
+            full_since = None
 
             current_time = time.time()
             if current_time - last_frame_time < fps_interval:

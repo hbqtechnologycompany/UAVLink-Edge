@@ -11,6 +11,7 @@ dronebridge.exe
 # Trạng thái runtime (4G/netmon, web UI)
 data/connection_status.json
 data/connection_config.json
+data/reregister.json
 
 # Cấu hình local / test
 config-test.yaml

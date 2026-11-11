@@ -20,6 +20,15 @@ ETH_PIXHAWK_TABLE=103
 ETH_PIXHAWK_NAME="eth_pixhawk"
 MARK=0x01
 DRONEBRIDGE_USER="cm5drone6425"
+if ! id -u "$DRONEBRIDGE_USER" >/dev/null 2>&1; then
+    # shellcheck source=../lib/board.sh
+    source "$(dirname "$(readlink -f "$0")")/../lib/board.sh"
+    DRONEBRIDGE_USER="$(dronebridge_service_user)"
+    if [ -z "$DRONEBRIDGE_USER" ]; then
+        echo "[PBR] ✗ không xác định được user chạy dronebridge.service"
+        exit 1
+    fi
+fi
 # Subnet PX4 LAN — khớp config.yaml ethernet.local_ip /24
 ETH_LAN_CIDR="${DRONEBRIDGE_ETH_LAN_CIDR:-10.41.10.0/24}"
 # PX4 netdev — CM5 end0, Pi4 eth0 (setup_eth.sh / eth_plane.py)

@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lcd import CM5SystemScreen, DroneScreen, collect_live, display_image, open_display
+from lcd import CM5SystemScreen, DroneScreen, collect_live, display_image, open_display, resolve_bus
 
 _running = True
 _LOCK_FP = None
@@ -55,7 +55,7 @@ def _stop(*_args) -> None:
     _running = False
 
 
-def _load_lcd_cfg(install_dir: str) -> dict:
+def _load_config(install_dir: str) -> dict:
     cfg_path = Path(install_dir) / "config.yaml"
     if not cfg_path.is_file():
         return {}
@@ -63,27 +63,31 @@ def _load_lcd_cfg(install_dir: str) -> dict:
         import yaml  # type: ignore
 
         with cfg_path.open(encoding="utf-8") as f:
-            full = yaml.safe_load(f) or {}
-        return full.get("lcd") or {}
+            return yaml.safe_load(f) or {}
     except Exception:
         return {}
 
 
 def main() -> int:
     install_dir = os.environ.get("DRONEBRIDGE_INSTALL_DIR", "/opt/dronebridge")
-    lcd_cfg = _load_lcd_cfg(install_dir)
-    web_port = 8080
+    full_cfg = _load_config(install_dir)
+    lcd_cfg = full_cfg.get("lcd") or {}
+    if lcd_cfg and not lcd_cfg.get("enabled", True):
+        print("lcd.enabled=false trong config.yaml — không chạy LCD")
+        return 0
     try:
-        import yaml  # type: ignore
-
-        with (Path(install_dir) / "config.yaml").open(encoding="utf-8") as f:
-            web_port = int((yaml.safe_load(f) or {}).get("web", {}).get("port", 8080))
-    except Exception:
-        pass
+        web_port = int((full_cfg.get("web") or {}).get("port", 8080))
+    except (TypeError, ValueError):
+        web_port = 8080
+    board = str(full_cfg.get("board") or "")
 
     parser = argparse.ArgumentParser(description="SH1107 live dashboard")
     parser.add_argument("--install-dir", default=install_dir)
-    parser.add_argument("--bus", type=int, default=int(lcd_cfg.get("bus", os.environ.get("LCD_I2C_BUS", 3))))
+    parser.add_argument(
+        "--bus",
+        type=int,
+        default=int(os.environ.get("LCD_I2C_BUS") or resolve_bus(lcd_cfg.get("bus"), board)),
+    )
     parser.add_argument("--addr", type=lambda x: int(x, 0), default=int(lcd_cfg.get("address", 0x3C)))
     parser.add_argument("--interval", type=float, default=float(lcd_cfg.get("interval", 1.0)))
     parser.add_argument("--hold", type=float, default=float(lcd_cfg.get("screen_hold", 5.0)))

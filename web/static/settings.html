@@ -812,7 +812,7 @@
             <!-- Camera Settings CM5 -->
             <div class="setting-card card-camera-settings setting-card-static">
                 <div class="card-icon">🎥</div>
-                <div class="card-title">Camera Settings CM5</div>
+                <div class="card-title">Camera Settings <span class="db-board">CM5</span></div>
                 <div class="card-desc">
                     Configure CSI sensors (CAM0/CAM1) and stream settings. Save writes config; restart or reboot when you are ready to apply.
                 </div>
@@ -1232,7 +1232,7 @@ Loading GPS information...
     <div id="cameraSetupModal" class="modal">
         <div class="modal-content modal-content-camera">
             <div class="modal-header">
-                <h2 class="modal-title">Camera CM5</h2>
+                <h2 class="modal-title">Camera <span class="db-board">CM5</span></h2>
                 <button class="close-btn" onclick="closeModal('cameraSetupModal')">×</button>
             </div>
 
@@ -1247,7 +1247,7 @@ Loading GPS information...
                         <option value="1">CAM1 · J29</option>
                     </select>
                     <small style="color: var(--text-secondary); display:block; margin-top:0.35rem">
-                        Camera còn lại tự động publish lên <code>/cam1</code>. RAM CM5: <span id="memory-tier-label">—</span> GB
+                        Camera còn lại tự động publish lên <code>/cam1</code>. RAM <span class="db-board">CM5</span>: <span id="memory-tier-label">—</span> GB
                         (tự tối ưu buffer/CV khi bật auto memory profile).
                     </small>
                 </div>
@@ -1396,7 +1396,7 @@ Loading GPS information...
                 <button class="btn btn-primary" onclick="saveCameraAll()">Save</button>
                 <button type="button" class="btn btn-secondary" onclick="testCameras()">Test camera</button>
                 <button type="button" id="cam-btn-restart" class="btn btn-secondary btn-action-pending" disabled onclick="restartCameraStreams()">Restart stream</button>
-                <button type="button" id="cam-btn-reboot" class="btn btn-warning btn-action-pending" disabled onclick="rebootCM5()">Reboot CM5</button>
+                <button type="button" id="cam-btn-reboot" class="btn btn-warning btn-action-pending" disabled onclick="rebootCM5()">Reboot <span class="db-board">CM5</span></button>
                 <button class="btn btn-secondary" onclick="refreshCameraDetect(true)">Rescan</button>
                 <button class="btn btn-secondary" onclick="closeModal('cameraSetupModal')">Close</button>
             </div>
@@ -1508,7 +1508,7 @@ Loading GPS information...
             syncCameraApplyButtons();
             let msg = 'Configuration saved.\n\n';
             if (needsReboot) {
-                msg += 'Sensor changed — use Reboot CM5, then Restart stream if needed.';
+                msg += 'Sensor changed — use Reboot ' + window.dbBoardLabel() + ', then Restart stream if needed.';
             } else {
                 msg += 'Use Restart stream to apply stream settings.';
             }
@@ -1947,17 +1947,17 @@ Loading GPS information...
         function rebootCM5() {
             const btn = document.getElementById('cam-btn-reboot');
             if (btn && btn.disabled) return Promise.resolve();
-            if (!confirm('Reboot CM5 to apply sensor boot configuration?\nThe drone will be offline for a few minutes.')) {
+            if (!confirm('Reboot ' + window.dbBoardLabel() + ' to apply sensor boot configuration?\nThe drone will be offline for a few minutes.')) {
                 return Promise.resolve();
             }
             const output = document.getElementById('cameraSetupOutput');
-            if (output) output.textContent = 'Applying overlay and rebooting CM5...\n';
+            if (output) output.textContent = 'Applying overlay and rebooting ' + window.dbBoardLabel() + '...\n';
             return fetch('/api/camera/apply-overlay', { method: 'POST' })
                 .then(r => r.json())
                 .then(d => {
                     if (output) {
                         if (d.success) {
-                            output.textContent = '✓ ' + (d.message || 'CM5 will reboot shortly.') + '\n';
+                            output.textContent = '✓ ' + (d.message || window.dbBoardLabel() + ' will reboot shortly.') + '\n';
                             if (d.output) output.textContent += d.output + '\n';
                         } else {
                             output.textContent = '✗ Reboot failed: ' + (d.message || 'unknown');

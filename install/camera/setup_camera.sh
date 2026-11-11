@@ -30,6 +30,14 @@ BOOT_CONFIG="/boot/firmware/config.txt"
 DETECTED="$INSTALL_DIR/Find_landing/camera_detected.json"
 MARKER="$INSTALL_DIR/.need_camera_reboot"
 
+# shellcheck source=../lib/board.sh
+source "$SCRIPT_DIR/../lib/board.sh"
+if [ "$(dronebridge_board)" = walnutpi ]; then
+    # cam0 = IMX219 2-lane trên VIN (CSI0). Image hãng chỉ có driver ov5647_mipi, nên
+    # cài driver imx219.ko + overlay từ install/camera/walnutpi/imx219 (build.sh dựng lại từ nguồn).
+    exec bash "$SCRIPT_DIR/walnutpi/setup_imx219.sh" "$@"
+fi
+
 read -r AUTO_SETUP <<< "$(python3 - "$CONFIG" <<'PY'
 import sys, yaml
 with open(sys.argv[1]) as f:

@@ -7,6 +7,7 @@ import (
 
 	"DroneBridge/camera"
 	"DroneBridge/config"
+	"DroneBridge/redact"
 )
 
 var appConfigFile string
@@ -180,8 +181,8 @@ func cameraConfigToUI(cfg *config.Config, cameraID int) map[string]interface{} {
 		"mediamtx_port":     m.RTSPPort,
 		"mediamtx_webrtc_port": m.WebRTCPort,
 		"mediamtx_hls_port": m.HLSPort,
-		"publish_path":      pub,
-		"drone_id":          cfg.Auth.UUID,
+		"publish_path":      redact.UUIDs(pub),
+		"drone_id":          redact.UUID(cfg.Auth.UUID),
 		"bitrate":           bitrate,
 		"detection_enabled": stream.DetectionEnabled,
 		"overlay_enabled":   stream.OverlayEnabled,

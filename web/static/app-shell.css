@@ -194,6 +194,12 @@ body {
     font-size: var(--shell-fs-xs);
     color: var(--shell-text-tertiary);
 }
+.sidebar-brand-text .sidebar-board {
+    display: block;
+    font-weight: 600;
+    color: var(--shell-accent, var(--shell-text-secondary));
+}
+.sidebar-brand-text .sidebar-board:empty { display: none; }
 .app-sidebar.collapsed .sidebar-brand-text { display: none; }
 
 .sidebar-nav { flex: 1; overflow-y: auto; padding: 0.625rem 0.75rem; }
@@ -364,6 +370,8 @@ body {
 
 .power-btn:disabled { opacity: 0.55; cursor: wait; }
 .power-btn.register { color: var(--shell-accent); border-color: var(--shell-accent); }
+.power-btn.register.attention { color: #fff; background: var(--shell-warning); border-color: var(--shell-warning); animation: register-pulse 1.6s ease-in-out infinite; }
+@keyframes register-pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--shell-warning) 35%, transparent); } }
 .power-btn.reboot { color: var(--shell-warning); border-color: var(--shell-warning); }
 .power-btn.off { color: #fff; background: var(--shell-danger); border-color: var(--shell-danger); }
 .power-btn.ghost { background: transparent; color: var(--shell-text-secondary); }

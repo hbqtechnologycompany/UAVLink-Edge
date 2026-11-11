@@ -3,12 +3,16 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"syscall"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Config represents the application configuration
 type Config struct {
+	Board    string         `yaml:"board,omitempty"` // auto (default) | cm5 | walnutpi
+	Hardware BoardProfile   `yaml:"-"`
 	Log      LogConfig      `yaml:"log"`
 	Auth     AuthConfig     `yaml:"auth"`
 	Cellular CellularConfig `yaml:"cellular"`
@@ -29,6 +33,36 @@ type LogConfig struct {
 	ServerConnectionOnly   bool   `yaml:"server_connection_only"`    // Show only server connection logs
 	ShowWebInteractionLogs bool   `yaml:"show_web_interaction_logs"` // Show logs/errors for local web interactions (:8080)
 	ShowPacketStats        bool   `yaml:"show_packet_stats"`         // Show periodic packet statistics (MSGID/PKT/BANDWIDTH)
+	// File chỉ chứa WARN/ERROR (giữ lâu hơn journal). Đường dẫn tương đối tính từ thư mục config.yaml;
+	// "off" = tắt. Dung lượng tối đa ≈ error_file_max_mb × (error_file_keep + 1).
+	ErrorFile      string `yaml:"error_file,omitempty"`
+	ErrorFileMaxMB int    `yaml:"error_file_max_mb,omitempty"`
+	ErrorFileKeep  int    `yaml:"error_file_keep,omitempty"`
+}
+
+// Mặc định file lỗi: data/logs/dronebridge-errors.log, 2 MB × (4 + 1) ≈ 10 MB.
+const (
+	DefaultErrorFile      = "data/logs/dronebridge-errors.log"
+	DefaultErrorFileMaxMB = 2
+	DefaultErrorFileKeep  = 4
+)
+
+// ErrorFilePath trả về đường dẫn tuyệt đối của file lỗi, "" nếu tắt.
+func (l LogConfig) ErrorFilePath(configFile string) string {
+	p := l.ErrorFile
+	switch p {
+	case "off", "none", "-":
+		return ""
+	case "":
+		p = DefaultErrorFile
+	}
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(filepath.Dir(configFile), p)
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	return p
 }
 
 // EthernetConfig contains ethernet interface settings for Pixhawk connection
@@ -81,9 +115,9 @@ type NetworkConfig struct {
 	ConnectionType       string `yaml:"connection_type"`        // "serial", "ethernet", or "prefer_ethernet"
 	SerialPort           string `yaml:"serial_port"`            // legacy alias of telem2_port
 	SerialBaud           int    `yaml:"serial_baud"`            // legacy; telem2_baud wins for TELEM2
-	Telem2Port           string `yaml:"telem2_port"`            // CM5 UART2 4-wire TX4 RX5 CTS6 RTS7
+	Telem2Port           string `yaml:"telem2_port"`            // CM5 /dev/ttyAMA2 (GPIO4-7); WalnutPi /dev/ttyS2 (J23 pin 4/5)
 	Telem2Baud           int    `yaml:"telem2_baud"`            // 1500000 8N1, no RTS/CTS
-	Telem3Port           string `yaml:"telem3_port"`            // CM5 UART3 4-wire TX8 RX9 CTS10 RTS11
+	Telem3Port           string `yaml:"telem3_port"`            // CM5 /dev/ttyAMA3 (GPIO8-11); WalnutPi: none
 	Telem3Baud           int    `yaml:"telem3_baud"`            // 1500000 8N1, no RTS/CTS
 	LinkLossTimeoutMs    int    `yaml:"link_loss_timeout_ms"`   // PX4 HEARTBEAT loss before leaving a link
 	EthRecoverHeartbeats int    `yaml:"eth_recover_heartbeats"` // PX4 HEARTBEATs required before returning to Ethernet
@@ -320,6 +354,9 @@ func Load(filename string) (*Config, error) {
 		cfg.VPN.RouterVPNIP = "10.8.0.1"
 	}
 
+	cfg.Hardware = ResolveBoardProfile(cfg.Board)
+	applyBoardProfile(&cfg, cfg.Hardware)
+
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
@@ -452,9 +489,27 @@ func (c *Config) Save(filename string) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(filename, data, 0644); err != nil {
+	// config.yaml chứa auth.shared_secret: file mới 0600; file có sẵn giữ mode/chủ (LCD, camera
+	// chạy cùng user dịch vụ). Ghi file tạm rồi rename để không bao giờ để lại file ghi dở.
+	mode := os.FileMode(0600)
+	uid, gid := -1, -1
+	if st, err := os.Stat(filename); err == nil {
+		mode = st.Mode().Perm()
+		if sys, ok := st.Sys().(*syscall.Stat_t); ok {
+			uid, gid = int(sys.Uid), int(sys.Gid)
+		}
+	}
+	tmp := filename + ".tmp"
+	if err := os.WriteFile(tmp, data, mode); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
-
+	_ = os.Chmod(tmp, mode)
+	if uid >= 0 {
+		_ = os.Chown(tmp, uid, gid)
+	}
+	if err := os.Rename(tmp, filename); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
 	return nil
 }

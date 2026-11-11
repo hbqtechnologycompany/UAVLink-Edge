@@ -39,7 +39,20 @@ QMI_RETRY_ERRORS = (
     "Error reading from istream",
 )
 
-# GPIO pins (gpiochip0)
+def _is_walnutpi() -> bool:
+    if os.getenv("DRONEBRIDGE_BOARD", "").lower() in ("walnutpi", "cm2"):
+        return True
+    try:
+        with open("/proc/device-tree/model", "rb") as f:
+            return b"walnutpi" in f.read().lower()
+    except OSError:
+        return False
+
+
+# GPIO pins (gpiochip0) — số BCM của Raspberry Pi CM5 trên carrier.
+# WalnutPi CM2: gpiochip0 là pinctrl T527 (line = PA/PB… khác hẳn), chưa có bản đồ
+# B2B cho 5 chân này → không điều khiển GPIO, module 4G phải được cấp nguồn sẵn.
+GPIO_POWER_ENABLED = not _is_walnutpi() and os.getenv("DRONEBRIDGE_4G_GPIO", "1") != "0"
 GPIOCHIP           = "gpiochip0"
 GPIO_POWER_MAIN    = 27   # LOW  = Power ON  (đảo logic)
 GPIO_CM5_ON_OFF_4G = 10   # LOW  = Power ON  (transistor đảo logic)
@@ -77,7 +90,7 @@ def _gpio_init():
         return False
 
 def gpio_set(pin, val):
-    if not _gpio_init(): return False
+    if not GPIO_POWER_ENABLED or not _gpio_init(): return False
     try:
         _gpio_req.set_value(pin, Value.ACTIVE if val else Value.INACTIVE)
         return True
@@ -86,7 +99,7 @@ def gpio_set(pin, val):
         return False
 
 def gpio_get(pin):
-    if not _gpio_init(): return None
+    if not GPIO_POWER_ENABLED or not _gpio_init(): return None
     try:
         return 1 if _gpio_req.get_value(pin) == Value.ACTIVE else 0
     except Exception:
@@ -329,6 +342,16 @@ def step_gpio_power_on():
 
     # Check trạng thái USB trước khi thay đổi GPIO
     already_up = os.path.exists("/dev/ttyUSB2")
+
+    if not GPIO_POWER_ENABLED:
+        warn("Bỏ qua GPIO nguồn 4G (WalnutPi CM2 hoặc DRONEBRIDGE_4G_GPIO=0) — dùng module đã có nguồn")
+        if not already_up:
+            info("Chưa thấy /dev/ttyUSB2 — đợi module (tối đa 25s)...")
+            for _ in range(25):
+                if os.path.exists("/dev/ttyUSB2"):
+                    break
+                time.sleep(1)
+        return
 
     gpio_map = [
         (GPIO_POWER_MAIN,    0, "PWR_MAIN    → ON  (low)"),

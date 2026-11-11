@@ -68,6 +68,14 @@ auth:
 
 Bỏ qua cả hai trường (hoặc `vehicle_type: 0` và `model: ""`) → gói legacy v1.
 
+### Đổi airframe trên PX4 (vd. quad → rover)
+
+Server chỉ nhận loại phương tiện qua `REGISTER_INIT`, nên đổi airframe xong phải đăng ký lại.
+Dashboard so `HEARTBEAT.type` PX4 đang báo với `auth.vehicle_type` (0 = server giữ quadrotor);
+lệch nhau thì nút **Đăng ký lại** trên header nhấp nháy và trang Token & Phiên hiện cảnh báo.
+Nhấn **Đăng ký lại** với ô loại phương tiện để "Theo PX4": `install/service/reregister.sh <uuid> <type>`
+ghi `auth.vehicle_type`, gửi `REGISTER_INIT` v2 rồi khởi động lại dịch vụ (lỗi thì khôi phục config cũ).
+
 ### 2. Chạy đăng ký một lần
 
 ```bash

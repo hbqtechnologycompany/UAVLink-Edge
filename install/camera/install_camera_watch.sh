@@ -16,7 +16,7 @@ apt-get install -y inotify-tools 2>/dev/null || true
 
 chmod +x "$SCRIPT_DIR/watch_camera_overlay.sh" "$SCRIPT_DIR/apply_camera_overlay.sh"
 
-bash "$SCRIPT_DIR/install_camera_sudoers.sh" "${SUDO_USER:-cm5drone6425}" 2>/dev/null || true
+bash "$SCRIPT_DIR/install_camera_sudoers.sh" ${SUDO_USER:+"$SUDO_USER"} || true
 
 UNIT_SRC="$INSTALL_DIR/etc/systemd/dronebridge-camera-watch.service"
 UNIT_DST="/etc/systemd/system/dronebridge-camera-watch.service"

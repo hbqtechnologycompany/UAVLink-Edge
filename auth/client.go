@@ -16,6 +16,7 @@ import (
 
 	"DroneBridge/metrics"
 	"DroneBridge/network"
+	"DroneBridge/redact"
 	"DroneBridge/vpn"
 )
 
@@ -112,7 +113,7 @@ func NewClient(host string, port int, droneUUID string, sharedSecret string, kee
 	// If UUID is empty, try to get or generate one
 	if droneUUID == "" {
 		droneUUID = getOrGenerateUUID()
-		log.Printf("[AUTH] No UUID provided in config, using auto-generated: %s", droneUUID)
+		log.Printf("[AUTH] No UUID provided in config, using auto-generated: %s", redact.UUID(droneUUID))
 	}
 
 	return &Client{
@@ -234,7 +235,7 @@ func (c *Client) Start() error {
 	}
 	c.mu.RUnlock()
 
-	log.Printf("[AUTH] Starting authentication client for drone UUID=%s", c.droneUUID)
+	log.Printf("[AUTH] Starting authentication client for drone UUID=%s", redact.UUID(c.droneUUID))
 
 	// Check if already have valid session from REGISTER
 	c.mu.RLock()
@@ -290,7 +291,7 @@ func (c *Client) Register() error {
 
 	log.Printf("========================================")
 	log.Printf("⚠️  [REGISTER] ONE-TIME REGISTRATION STARTING")
-	log.Printf("⚠️  [REGISTER] UUID: %s", c.droneUUID)
+	log.Printf("⚠️  [REGISTER] UUID: %s", redact.UUID(c.droneUUID))
 	log.Printf("⚠️  [REGISTER] This should only happen ONCE.")
 	log.Printf("⚠️  [REGISTER] If you see this repeatedly, --register")
 	log.Printf("⚠️  [REGISTER] must NOT be in the systemd service file!")
@@ -329,9 +330,9 @@ func (c *Client) Register() error {
 		return fmt.Errorf("failed to send REGISTER_INIT: %w", err)
 	}
 	if vehicleType != 0 || model != "" {
-		log.Printf("[REGISTER] ▶ REGISTER_INIT v2 sent → server (UUID=%s, vehicle_type=%d, model=%q)", c.droneUUID, vehicleType, model)
+		log.Printf("[REGISTER] ▶ REGISTER_INIT v2 sent → server (UUID=%s, vehicle_type=%d, model=%q)", redact.UUID(c.droneUUID), vehicleType, model)
 	} else {
-		log.Printf("[REGISTER] ▶ REGISTER_INIT sent → server (UUID=%s)", c.droneUUID)
+		log.Printf("[REGISTER] ▶ REGISTER_INIT sent → server (UUID=%s)", redact.UUID(c.droneUUID))
 	}
 
 	// Step 2: Receive REGISTER_CHALLENGE
@@ -649,7 +650,7 @@ func (c *Client) authenticate() error {
 			return fmt.Errorf("failed to load secret key (drone not registered?): %w. Run with --register first", err)
 		}
 		if uuid != c.droneUUID {
-			log.Printf("[AUTH] Warn: Secret file UUID (%s) doesn't match config UUID (%s)", uuid, c.droneUUID)
+			log.Printf("[AUTH] Warn: Secret file UUID (%s) doesn't match config UUID (%s)", redact.UUID(uuid), redact.UUID(c.droneUUID))
 		}
 		c.secret = key
 		log.Printf("[AUTH] Loaded secret key from storage")
@@ -702,7 +703,7 @@ func (c *Client) authenticate() error {
 		resetConn("AUTH_INIT write failed")
 		return fmt.Errorf("failed to send AUTH_INIT: %w", err)
 	}
-	log.Printf("[AUTH] ✓ Sent AUTH_INIT (UUID=%s)", c.droneUUID)
+	log.Printf("[AUTH] ✓ Sent AUTH_INIT (UUID=%s)", redact.UUID(c.droneUUID))
 
 	// Step 3: Receive AUTH_CHALLENGE
 	conn.SetReadDeadline(time.Now().Add(authChallengeReadTimeout))
@@ -777,6 +778,10 @@ func (c *Client) authenticate() error {
 
 	if ack.Result != ResultSuccess {
 		resetConn(fmt.Sprintf("AUTH_ACK reject error=%d", ack.ErrorCode))
+		if ack.ErrorCode == ErrTimestampOutOfRange {
+			return fmt.Errorf("authentication failed (error=%d timestamp lệch: giờ máy %s UTC, NTP đồng bộ=%v, wait=%ds)",
+				ack.ErrorCode, time.Unix(int64(timestamp), 0).UTC().Format("2006-01-02 15:04:05"), ClockSynced(), ack.WaitSec)
+		}
 		return fmt.Errorf("authentication failed (error=%d, wait=%ds)", ack.ErrorCode, ack.WaitSec)
 	}
 
@@ -786,7 +791,7 @@ func (c *Client) authenticate() error {
 	}
 
 	log.Printf("[AUTH] ✅ Authentication successful! (identity verified)")
-	metrics.Global.AddLog("INFO", "Authentication successful - UUID: "+c.droneUUID)
+	metrics.Global.AddLog("INFO", "Authentication successful - UUID: "+redact.UUID(c.droneUUID))
 
 	// Store session info
 	c.mu.Lock()
@@ -799,7 +804,7 @@ func (c *Client) authenticate() error {
 	c.markConnected()
 
 	log.Printf("[SESSION] ✅ Session ready!")
-	log.Printf("[SESSION]    Token: %s...", c.sessionToken[:20])
+	log.Printf("[SESSION]    Token: %s (len=%d)", redact.Hint(c.sessionToken), len(c.sessionToken))
 	log.Printf("[SESSION]    Expires: %s", c.expiresAt.Format("2006-01-02 15:04:05"))
 
 	return nil
@@ -825,7 +830,7 @@ func (c *Client) requestSession(conn net.Conn) error {
 		return fmt.Errorf("failed to send SESSION_NEW: %w", err)
 	}
 	log.Printf("[SESSION] ✓ Sent SESSION_NEW (UUID=%s, oldToken=%s)",
-		c.droneUUID, truncateToken(oldToken))
+		redact.UUID(c.droneUUID), truncateToken(oldToken))
 
 	// Receive SESSION_ACK
 	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
@@ -856,22 +861,19 @@ func (c *Client) requestSession(conn net.Conn) error {
 	c.markConnected()
 
 	log.Printf("[SESSION] ✅ Session ready!")
-	log.Printf("[SESSION]    Token: %s...", c.sessionToken[:20])
+	log.Printf("[SESSION]    Token: %s (len=%d)", redact.Hint(c.sessionToken), len(c.sessionToken))
 	log.Printf("[SESSION]    Expires: %s", c.expiresAt.Format("2006-01-02 15:04:05"))
 	log.Printf("[SESSION]    Refresh Interval: %.0fs", c.refreshInterval.Seconds())
 
 	return nil
 }
 
-// truncateToken returns first 20 chars of token or "none"
+// truncateToken returns a log-safe hint of a token or "none".
 func truncateToken(token string) string {
 	if token == "" {
 		return "none"
 	}
-	if len(token) > 20 {
-		return token[:20] + "..."
-	}
-	return token
+	return redact.Hint(token)
 }
 
 // RefreshError represents an error from session refresh with error code

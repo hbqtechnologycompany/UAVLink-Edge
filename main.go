@@ -60,6 +60,7 @@ func runAuthWhenReady(authClient *auth.Client, vpnMgr *vpn.Manager, fwd *forward
 		logger.Warn("[STARTUP] cloud_ready chưa bật — xác thực trên đường hiện có, kiểm tra lại khi cờ đổi")
 		go watchCloudAndRebind(vpnMgr, fwd)
 	}
+	waitClockForAuth()
 	logger.Info("[STARTUP] Authenticating with router server...")
 	if err := authClient.Start(); err != nil {
 		logger.Warn("[AUTH] Initial authentication failed: %v", err)
@@ -89,6 +90,35 @@ func watchCloudAndRebind(vpnMgr *vpn.Manager, fwd *forwarder.Forwarder) {
 	}
 }
 
+// clockSyncWait: thời gian tối đa chờ NTP trước lần xác thực đầu.
+// RTC của WalnutPi CM2 về 1970 mỗi lần boot; systemd chỉ khôi phục giờ lúc tắt máy lần trước,
+// nên timestamp lệch và server trả error=1 cho tới khi NTP chỉnh giờ.
+const clockSyncWait = 60 * time.Second
+
+func waitClockForAuth() {
+	if auth.ClockSynced() {
+		return
+	}
+	logger.Warn("[AUTH] ⏰ Đồng hồ chưa đồng bộ NTP (giờ máy %s UTC) — chờ tối đa %s rồi mới xác thực",
+		time.Now().UTC().Format("2006-01-02 15:04:05"), clockSyncWait)
+	if auth.WaitClockSync(clockSyncWait) {
+		logger.Info("[AUTH] ⏰ Đồng hồ đã đồng bộ NTP (%s UTC)", time.Now().UTC().Format("2006-01-02 15:04:05"))
+	} else {
+		logger.Warn("[AUTH] ⏰ Hết %s vẫn chưa đồng bộ NTP — vẫn thử xác thực", clockSyncWait)
+	}
+}
+
+// waitAuthRetry ngủ tới lượt thử kế tiếp; nếu đồng hồ đang chưa đồng bộ thì thử ngay khi NTP xong.
+func waitAuthRetry(interval time.Duration) {
+	if auth.ClockSynced() {
+		time.Sleep(interval)
+		return
+	}
+	if auth.WaitClockSync(interval) {
+		logger.Info("[AUTH] ⏰ Đồng hồ vừa đồng bộ NTP — thử xác thực ngay")
+	}
+}
+
 func startAuthWithRetry(authClient *auth.Client, vpnMgr *vpn.Manager, fwd *forwarder.Forwarder, retrySec int) {
 	if retrySec <= 0 {
 		retrySec = 15
@@ -96,7 +126,7 @@ func startAuthWithRetry(authClient *auth.Client, vpnMgr *vpn.Manager, fwd *forwa
 	interval := time.Duration(retrySec) * time.Second
 	go func() {
 		for {
-			time.Sleep(interval)
+			waitAuthRetry(interval)
 			logger.Warn("[AUTH] Retrying authentication in background (every %ds)...", retrySec)
 			if err := authClient.Start(); err != nil {
 				logger.Warn("[AUTH] Background authentication retry failed: %v", err)
@@ -143,6 +173,24 @@ func main() {
 
 	// Route stdlib log.Printf (used by auth/web packages) through logger filters.
 	logger.InstallStdLogBridge()
+
+	if p := cfg.Log.ErrorFilePath(*configFile); p != "" {
+		maxMB, keep := cfg.Log.ErrorFileMaxMB, cfg.Log.ErrorFileKeep
+		if maxMB <= 0 {
+			maxMB = config.DefaultErrorFileMaxMB
+		}
+		if keep <= 0 {
+			keep = config.DefaultErrorFileKeep
+		}
+		logger.ConfigureErrorFile(p, int64(maxMB)<<20, keep)
+		logger.Info("[LOGGER] WARN/ERROR → %s (%d MB × %d file)", p, maxMB, keep+1)
+	}
+
+	telem3 := cfg.Network.Telem3Port
+	if telem3 == "" {
+		telem3 = "none"
+	}
+	logger.Info("[BOARD] %s — TELEM2 %s, TELEM3 %s, LCD /dev/i2c-%d", cfg.Hardware.Name, cfg.Network.Telem2Port, telem3, cfg.LCD.Bus)
 
 	// Configure runtime log scopes from config.
 	logger.ConfigureScopeFilters(cfg.Log.ServerConnectionOnly, cfg.Log.ShowWebInteractionLogs)

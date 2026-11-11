@@ -607,7 +607,7 @@ func setupInterfaceIP(ifaceName, ipAddr, subnet string) error {
 	if subnet == "" {
 		subnet = "24"
 	}
-	cmd := exec.Command("sudo", "ip", "addr", "add", fmt.Sprintf("%s/%s", ipAddr, subnet), "dev", ifaceName)
+	cmd := exec.Command("sudo", "-n", "ip", "addr", "add", fmt.Sprintf("%s/%s", ipAddr, subnet), "dev", ifaceName)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// Check if IP already exists

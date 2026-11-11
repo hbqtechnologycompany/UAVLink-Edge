@@ -27,6 +27,7 @@ type pixhawkUDPConn struct {
 	remoteMu    sync.Mutex
 	lastRemote  *net.UDPAddr
 	fixedRemote *net.UDPAddr
+	lastErrLog  time.Time
 }
 
 type pixhawkBind struct {
@@ -116,7 +117,20 @@ func (p *pixhawkUDPConn) Write(b []byte) (int, error) {
 	if remote == nil {
 		return len(b), nil
 	}
-	return p.conn.WriteToUDP(b, remote)
+	// gomavlib stops the channel writer for good on the first Write error
+	// (e.g. eth0 not up yet at boot, cable unplugged), so never surface it.
+	if _, err := p.conn.WriteToUDP(b, remote); err != nil {
+		p.remoteMu.Lock()
+		logNow := time.Since(p.lastErrLog) >= 10*time.Second
+		if logNow {
+			p.lastErrLog = time.Now()
+		}
+		p.remoteMu.Unlock()
+		if logNow {
+			logger.Warn("[PARTNER_HB] UDP write to %s failed: %v", remote, err)
+		}
+	}
+	return len(b), nil
 }
 
 func (p *pixhawkUDPConn) Close() error {

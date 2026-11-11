@@ -24,8 +24,9 @@ import (
 
 	"DroneBridge/auth"
 	"DroneBridge/camera"
-	"DroneBridge/config"
+	"DroneBridge/logger"
 	"DroneBridge/metrics"
+	"DroneBridge/redact"
 )
 
 //go:embed static/*
@@ -655,6 +656,8 @@ func sanitizeJSONValue(value interface{}) interface{} {
 
 func StartServer(port int, authClient *auth.Client, droneUUID string) {
 	registerHostPowerRoutes()
+	registerDroneIdentityRoutes(authClient, droneUUID)
+	http.HandleFunc("/api/system/board", handleSystemBoard)
 	// Pre-load XML file into memory cache for faster serving
 	loadXMLCache()
 
@@ -735,6 +738,8 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 		}
 		mergeNetworkIntoSnapshot(snap)
 		snap["host"] = hostThermalStatus()
+		snap["board"] = boardInfo()
+		snap["vehicle_profile"] = vehicleProfile(cfgVehicleType())
 		snap = sanitizeJSONValue(snap).(map[string]interface{})
 
 		if err := json.NewEncoder(w).Encode(snap); err != nil {
@@ -948,13 +953,14 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 		if !expires.IsZero() {
 			expiresOut = expires.Format(time.RFC3339)
 		}
+		// Token phiên là bí mật: chỉ gửi gợi ý 4 ký tự cuối, UUID đã che.
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"authenticated": authenticated,
 			"status":        status,
-			"token":         token,
+			"token_hint":    redact.Hint(token),
 			"expires_at":    expiresOut,
 			"local_ip":      localIP,
-			"drone_uuid":    droneUUID,
+			"drone_uuid":    redact.UUID(droneUUID),
 		})
 	})
 
@@ -1004,7 +1010,7 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"has_active_key": false,
 				"status":         "none",
-				"api_key":        nil,
+				"api_key_hint":   nil,
 				"error":          err.Error(),
 			})
 			return
@@ -1012,12 +1018,13 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 
 		// Convert response to frontend format
 		json.NewEncoder(w).Encode(map[string]interface{}{
+			// API key đầy đủ chỉ trả một lần lúc tạo, hoặc qua /api/drone/reveal (mật khẩu).
 			"has_active_key": state.HasActiveKey == 0x01,
 			"status":         state.Status,
-			"api_key":        state.APIKey,
+			"api_key_hint":   redact.Hint(state.APIKey),
 			"created_at":     formatUnixTimestamp(state.CreatedAt),
 			"expires_at":     formatUnixTimestamp(state.ExpiresAt),
-			"user_uuid":      state.UserUUID,
+			"user_uuid":      redact.UUID(state.UserUUID),
 			"username":       nil, // TODO: Fetch username from backend DB if needed
 			"user_active_at": formatUnixTimestamp(state.UserActivatedAt),
 		})
@@ -1046,9 +1053,19 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 			return
 		}
 
-		// Parse request body for expiration hours (optional)
+		// Parse request body: expiration_hours (optional), password (bắt buộc — tạo key là cấp quyền truy cập)
 		var req map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&req)
+		json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req)
+		pwStr, _ := req["password"].(string)
+		delete(req, "password")
+		pw := []byte(pwStr)
+		pwStr = ""
+		defer zeroBytes(pw)
+		if code, msg := verifyHostPassword(r, pw); code != http.StatusOK {
+			w.WriteHeader(code)
+			json.NewEncoder(w).Encode(map[string]interface{}{"error": msg})
+			return
+		}
 
 		expirationHours := 24 // Default
 		if exp, ok := req["expiration_hours"]; ok {
@@ -1394,7 +1411,7 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
-			"message": "Đã áp dụng boot overlay — CM5 reboot trong ~2s nếu config đổi",
+			"message": "Đã áp dụng boot overlay — " + boardLabel() + " reboot trong ~2s nếu config đổi",
 			"output":  text,
 		})
 	})
@@ -1526,12 +1543,12 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 		if setupErr != nil {
 			resp["setup_error"] = setupErr.Error()
 			if strings.Contains(setupErr.Error(), "password") || strings.Contains(setupErr.Error(), "sudo") {
-				resp["message"] = "Đã lưu loại CAM. Cần: sudo bash install/camera/install_camera_sudoers.sh rồi nhấn «Reboot CM5»."
+				resp["message"] = "Đã lưu loại CAM. Cần: sudo bash install/camera/install_camera_sudoers.sh rồi nhấn «Reboot " + boardLabel() + "»."
 			} else {
 				resp["message"] = "Đã lưu loại CAM. setup_camera lỗi — xem setup_output"
 			}
 		} else if needsReboot {
-			resp["message"] = "Đã lưu loại CAM. Boot overlay đã đổi — nhấn «Reboot CM5» trên UI để áp dụng."
+			resp["message"] = "Đã lưu loại CAM. Boot overlay đã đổi — nhấn «Reboot " + boardLabel() + "» trên UI để áp dụng."
 		} else {
 			resp["message"] = "Đã lưu loại CAM."
 		}
@@ -2311,7 +2328,7 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 			return
 		}
 
-		cfg, err := config.Load("config.yaml")
+		cfg, err := loadAppConfig()
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]interface{}{
@@ -2321,9 +2338,11 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 			return
 		}
 
+		// Chỉ trả các mục trang MAVLink cần; không bao giờ trả auth (shared_secret, uuid), vpn, cellular.
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
-			"config":  cfg,
+			"config":  mavlinkSettingsView(cfg),
+			"board":   boardInfo(),
 		})
 	})
 
@@ -2357,7 +2376,7 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 		}
 
 		// Load current config
-		cfg, err := config.Load("config.yaml")
+		cfg, err := loadAppConfig()
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]interface{}{
@@ -2371,9 +2390,12 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 		if connType, ok := req["connection_type"].(string); ok {
 			cfg.Network.ConnectionType = connType
 		}
-		if serialPort, ok := req["serial_port"].(string); ok {
-			cfg.Network.SerialPort = serialPort
+		if serialPort, ok := req["serial_port"].(string); ok && strings.TrimSpace(serialPort) != "" {
+			// px4_link ưu tiên telem2_port; serial_port là alias cũ — ghi cả hai.
+			cfg.Network.SerialPort = strings.TrimSpace(serialPort)
+			cfg.Network.Telem2Port = cfg.Network.SerialPort
 		}
+		applyEthernetSettings(cfg, req)
 		if serialBaud, ok := req["serial_baud"].(float64); ok {
 			cfg.Network.SerialBaud = int(serialBaud)
 		}
@@ -2382,7 +2404,7 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 		}
 
 		// Save config
-		if err := cfg.Save("config.yaml"); err != nil {
+		if err := saveAppConfig(cfg); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"success": false,
@@ -2394,7 +2416,7 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
 			"message": "Network config updated successfully. Please restart the service for changes to take effect.",
-			"config":  cfg.Network,
+			"config":  mavlinkSettingsView(cfg),
 		})
 	})
 
@@ -2408,8 +2430,11 @@ func StartServer(port int, authClient *auth.Client, droneUUID string) {
 			start := time.Now()
 			sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 			http.DefaultServeMux.ServeHTTP(sw, r)
-			if strings.HasPrefix(r.URL.Path, "/api/") {
-				log.Printf("[WEB][REQ] %s %s -> %d (%s)", r.Method, r.URL.Path, sw.status, time.Since(start).Round(time.Millisecond))
+			// Trang web gọi /api/* liên tục (status, preview…): chỉ ghi lỗi hoặc request chậm.
+			elapsed := time.Since(start)
+			if strings.HasPrefix(r.URL.Path, "/api/") &&
+				(sw.status >= 400 || elapsed >= 2*time.Second || logger.GetLevel() == logger.DEBUG) {
+				log.Printf("[WEB][REQ] %s %s -> %d (%s)", r.Method, r.URL.Path, sw.status, elapsed.Round(time.Millisecond))
 			}
 		}),
 		ReadTimeout:    15 * time.Second,

@@ -58,8 +58,11 @@ apply_once() {
     apply_overlay
 }
 
+# Theo dõi thư mục: TRIGGER thường chưa tồn tại, watch thẳng file đó làm inotifywait thoát ngay.
 while true; do
-    inotifywait -q -e close_write,moved_to,create -t 3600 "$DETECTED" "$TRIGGER" 2>/dev/null || continue
+    inotifywait -q -e close_write,moved_to,create -t 3600 \
+        --include '/(camera_detected\.json|apply-camera-overlay\.request)$' \
+        "$(dirname "$DETECTED")" "$(dirname "$TRIGGER")" >/dev/null 2>&1 || { sleep 1; continue; }
     if [ -f "$TRIGGER" ]; then
         apply_overlay
     else

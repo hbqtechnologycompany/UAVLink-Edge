@@ -183,7 +183,13 @@ func ScanLive(refresh bool) (*DetectResult, error) {
 		saved = defaultDetectedState()
 	}
 
-	connected, scanErr := parseRpicamList()
+	var connected []ConnectedCamera
+	var scanErr error
+	if HasVinCamera() {
+		connected = parseVinList()
+	} else {
+		connected, scanErr = parseRpicamList()
+	}
 	result := buildDetectResult(reg, saved, connected)
 	result.Cached = !refresh
 
@@ -250,9 +256,9 @@ func parseRpicamList() ([]ConnectedCamera, error) {
 
 func buildDetectResult(reg *Registry, saved *DetectedState, connected []ConnectedCamera) *DetectResult {
 	ports := map[string]PortStatus{}
-	indexByI2C := map[string]int{}
+	byPort := map[string]ConnectedCamera{}
 	for _, c := range connected {
-		indexByI2C[c.I2CBus] = c.LibcameraIndex
+		byPort[c.PhysicalPort] = c
 	}
 
 	expected := 0
@@ -273,9 +279,11 @@ func buildDetectResult(reg *Registry, saved *DetectedState, connected []Connecte
 			Connector:    conn,
 			I2CBus:       i2c,
 		}
-		if idx, ok := indexByI2C[i2c]; ok {
+		if c, ok := byPort[portName]; ok {
+			idx := c.LibcameraIndex
 			ps.Status = "ok"
 			ps.LibcameraIndex = &idx
+			ps.I2CBus = c.I2CBus
 		} else {
 			ps.Status = "error"
 			ps.Message = "Không probe được sensor trên cổng này (kiểm tra cáp / loại module / overlay)"

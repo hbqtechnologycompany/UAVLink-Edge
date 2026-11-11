@@ -1,0 +1,80 @@
+// WalnutPi CM2 trên carrier thiết kế cho CM5: quạt theo chân B2B của CM5.
+//   B2B 19  Fan_PWM   → CM2 PL7 (mcu_pwm0 kênh 5)
+//   B2B 16  Fan_Tacho → CM2 ADC22 (analog, không ngắt được) — không đọc tốc độ
+//   B2B 14  GND       → CM2 PL8: node pwm-fan hãng lấy tach ở đây, trên carrier CM5 bị nối đất
+//   B2B 111 VBUS_EN   → CM2 IR-RX (PI8): carrier dùng VBUS_EN bật nguồn 5 V cho quạt / USB3
+// Node hãng (/pwm-fan: 100 kHz, ngắt tach PL8 kéo lên) bị tắt; node mới 25 kHz không có tach
+// và nhận lại 4 mức làm mát của cpul_thermal_zone (20/50/60/70 °C).
+// Mức 0 phải khác 0: duty 0 tắt PWM, PL7 về trạng thái sleep và quạt 4 dây chạy hết tốc.
+// Bộ thu hồng ngoại (irrx, PI8) bị tắt; PI8 giữ mức cao 3,3 V suốt khi chạy như VBUS_EN của CM5.
+// Build: dtc -@ -I dts -O dtb -o sun55i-t527-dronebridge-fan.dtbo sun55i-t527-dronebridge-fan.dts
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target = <&fan>;
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+
+	fragment@1 {
+		target-path = "/";
+		__overlay__ {
+			dronebridge_vbus: dronebridge-vbus {
+				compatible = "regulator-fixed";
+				regulator-name = "dronebridge-vbus-en";
+				regulator-min-microvolt = <5000000>;
+				regulator-max-microvolt = <5000000>;
+				gpio = <&pio 8 8 0>;
+				enable-active-high;
+				regulator-boot-on;
+				regulator-always-on;
+			};
+
+			dronebridge_fan: dronebridge-fan {
+				compatible = "pwm-fan";
+				pwms = <&mcu_pwm0 5 40000 0>;
+				fan-supply = <&dronebridge_vbus>;
+				#cooling-cells = <2>;
+				cooling-levels = <1 100 150 200 255>;
+			};
+		};
+	};
+
+	fragment@2 {
+		target-path = "/thermal-zones/cpul_thermal_zone/cooling-maps/power_on";
+		__overlay__ {
+			cooling-device = <&dronebridge_fan 0 0>;
+		};
+	};
+
+	fragment@3 {
+		target-path = "/thermal-zones/cpul_thermal_zone/cooling-maps/warm";
+		__overlay__ {
+			cooling-device = <&dronebridge_fan 2 2>;
+		};
+	};
+
+	fragment@4 {
+		target-path = "/thermal-zones/cpul_thermal_zone/cooling-maps/hot";
+		__overlay__ {
+			cooling-device = <&dronebridge_fan 3 3>;
+		};
+	};
+
+	fragment@5 {
+		target-path = "/thermal-zones/cpul_thermal_zone/cooling-maps/vhot";
+		__overlay__ {
+			cooling-device = <&dronebridge_fan 4 4>;
+		};
+	};
+
+	fragment@6 {
+		target = <&irrx>;
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+};

@@ -10,6 +10,7 @@ import (
 
 	"DroneBridge/camera"
 	"DroneBridge/config"
+	"DroneBridge/redact"
 )
 
 func syncAllStreamerConfigs(cfg *config.Config) error {
@@ -144,7 +145,7 @@ func cameraSideReport(cameraID int) map[string]interface{} {
 		return out
 	}
 	if pub, err := camera.PublishPath(cfg, cameraID); err == nil {
-		out["publish_path"] = pub
+		out["publish_path"] = redact.UUIDs(pub)
 	}
 	if st := camera.ReadStreamStats(cameraID, 0); st != nil && st.AgeSec < 15 && st.FramesSent == 0 && st.FPSWindow == 0 {
 		out["verdict"] = "Cổng đã nhận cảm biến nhưng CSI không đưa khung hình."
@@ -209,10 +210,10 @@ func cameraStatusPayload() map[string]interface{} {
 				"name":         s.Name,
 				"camera_id":    s.CameraID,
 				"stream_role":  camera.StreamRole(cfg, s.CameraID),
-				"publish_path": pub,
-				"rtsp":         camera.RTSPURL(m, pub),
-				"webrtc_whep":  fmt.Sprintf("http://%s:%d%s/whep", m.Host, m.WebRTCPort, pub),
-				"hls":          fmt.Sprintf("http://%s:%d%s/index.m3u8", m.Host, m.HLSPort, pub),
+				"publish_path": redact.UUIDs(pub),
+				"rtsp":         redact.UUIDs(camera.RTSPURL(m, pub)),
+				"webrtc_whep":  redact.UUIDs(fmt.Sprintf("http://%s:%d%s/whep", m.Host, m.WebRTCPort, pub)),
+				"hls":          redact.UUIDs(fmt.Sprintf("http://%s:%d%s/index.m3u8", m.Host, m.HLSPort, pub)),
 			})
 		}
 	}

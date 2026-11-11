@@ -62,6 +62,8 @@ func StreamerEnv(stream config.CameraStreamConfig, multiCam bool) []string {
 	env := append(os.Environ(), fmt.Sprintf("DRONEBRIDGE_MULTI_CAMERA=%d", boolToInt(multiCam)))
 	backend := RTSPBackendName(stream, multiCam)
 	env = append(env, "DRONEBRIDGE_RTSP_BACKEND="+backend)
+	// stdout is a pipe into the service log; unbuffered keeps log lines in real time.
+	env = append(env, "PYTHONUNBUFFERED=1")
 	return env
 }
 

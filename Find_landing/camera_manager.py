@@ -1,11 +1,15 @@
 import threading
 import time
-from picamera2 import Picamera2
+try:
+    from picamera2 import Picamera2
+except ImportError:
+    Picamera2 = None
 import numpy as np
 import cv2
 import glob
 import re
 
+import walnutpi_camera
 from stream.wire_format import resolve_byte_order
 
 
@@ -80,6 +84,8 @@ class CameraManager:
             return self.cameras[camera_id]
     
     def _initialize_camera(self, camera_id, config=None):
+        if walnutpi_camera.has_vin_devices():
+            return self._initialize_vin_camera(camera_id, config)
 
         available_cameras = []
         try:
@@ -316,6 +322,29 @@ class CameraManager:
         for d in (self.cameras, self.camera_locks, self.camera_configs, self.camera_users):
             d.pop(camera_id, None)
 
+    def _initialize_vin_camera(self, camera_id, config=None):
+        """WalnutPi CSI: camN ↔ /dev/videoN (vinc N). Never falls back to USB — that would grab the CSI node raw."""
+        cfg = dict(config or {})
+        width, height = (640, 480)
+        sz = cfg.get('size')
+        if isinstance(sz, (tuple, list)) and len(sz) == 2:
+            width, height = int(sz[0]), int(sz[1])
+        fps = int(cfg.get('framerate') or 30)
+        if not walnutpi_camera.is_vin_device(camera_id):
+            print(f"✗ Camera {camera_id}: no CSI node /dev/video{camera_id} on this WalnutPi")
+            return None
+        cap, wb = walnutpi_camera.open_vin_camera(camera_id, width, height, fps)
+        if cap is None:
+            return None
+        cfg['actual_format'] = 'BGR888'
+        self.camera_configs[camera_id] = cfg
+        return {
+            'backend': 'cv2',
+            'cap': cap,
+            'device': f'/dev/video{camera_id}',
+            'wb': wb,
+        }
+
     def _sorted_video_nodes(self):
         nodes = glob.glob('/dev/video*')
 
@@ -392,7 +421,8 @@ class CameraManager:
                         if not ok or frame is None:
                             return None
                         # OpenCV V4L2 returns BGR — keep native order.
-                        return frame
+                        wb = camera.get('wb')
+                        return wb.apply(frame) if wb is not None else frame
 
                     frame = camera.capture_array()
                     return frame

@@ -1,8 +1,11 @@
 #!/bin/bash
-# TELEM2 / TELEM3 trên CM5 — UART 4 chân, gọi từ install.sh và dronebridge-uart-setup.service.
-# UART2 → /dev/ttyAMA2: TX GPIO4, RX GPIO5, CTS GPIO6, RTS GPIO7
-# UART3 → /dev/ttyAMA3: TX GPIO8, RX GPIO9, CTS GPIO10, RTS GPIO11
-# Cả hai 1500000 8N1. Flow control phần cứng tắt (termios không bật CRTSCTS).
+# TELEM UART cho PX4 — gọi từ install.sh và dronebridge-uart-setup.service (mỗi lần boot).
+# CM5:
+#   UART2 → /dev/ttyAMA2: TX GPIO4, RX GPIO5, CTS GPIO6, RTS GPIO7
+#   UART3 → /dev/ttyAMA3: TX GPIO8, RX GPIO9, CTS GPIO10, RTS GPIO11
+# WalnutPi CM2 (cùng đế CM5): chỉ một cổng
+#   UART2 → /dev/ttyS2: J23 chân 4 = PB0 TX, chân 5 = PB1 RX. Không CTS/RTS, không TELEM3.
+# Tất cả 1500000 8N1. Flow control phần cứng tắt (termios không bật CRTSCTS).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -15,6 +18,35 @@ MARKER="$INSTALL_DIR/.need_host_reboot"
 BLOCK_MARK="# DroneBridge: MAVLink UART2/UART3 4-wire"
 LINE2="dtoverlay=uart2-pi5,ctsrts"
 LINE3="dtoverlay=uart3-pi5,ctsrts"
+
+# shellcheck source=../lib/board.sh
+source "$SCRIPT_DIR/../lib/board.sh"
+if [ "$(dronebridge_board)" = walnutpi ]; then
+    # GPIO4-11 của đế CM5 không trùng UART nào của T527; TELEM2 lấy UART2 trên J23.
+    dronebridge_strip_boot_block "$BOOT_CONFIG" "$BLOCK_MARK" "dtoverlay=uart2-pi5" "dtoverlay=uart3-pi5"
+    DEV=/dev/ttyS2
+    rc=0
+    walnutpi_ensure_overlay uart2 /soc@3000000/uart@2500800 status okay || rc=$?
+    if [ "$rc" = 1 ]; then
+        echo "FAIL  WalnutPi UART2 overlay"
+        exit 1
+    fi
+    dronebridge_udev_rule 99-zz-dronebridge-uart.rules 'KERNEL=="ttyS2", GROUP="dialout", MODE="0660"'
+    dronebridge_add_service_group dialout
+    CONFIG="$INSTALL_DIR/config.yaml"
+    dronebridge_config_set "$CONFIG" network telem2_port "$DEV"
+    dronebridge_config_set "$CONFIG" network serial_port "$DEV"
+    dronebridge_config_set "$CONFIG" network telem3_port '""'
+    if [ "$rc" = 0 ] && [ -e "$DEV" ]; then
+        chgrp dialout "$DEV" && chmod 0660 "$DEV"
+        dronebridge_clear_reboot_reason "$INSTALL_DIR" uart
+        echo "✅ TELEM2 $DEV (UART2, J23 chân 4 TX / chân 5 RX)"
+    else
+        dronebridge_add_reboot_reason "$INSTALL_DIR" uart
+        echo "⚠️  TELEM2 $DEV chưa có — reboot để kernel nạp DTB mới"
+    fi
+    exit 0
+fi
 
 if [ ! -f "$BOOT_CONFIG" ]; then
     echo "Không thấy boot config — bỏ qua UART"

@@ -9,7 +9,7 @@ auth:
     enabled: true
     host: 45.117.171.237
     port: 5770
-    uuid: 9f14f259-576c-41ad-90f9-783e6d831455
+    uuid: 00000027-0000-0000-0000-000000000027
     shared_secret: drone-fleet-shared-secret-auth-key-2025
     vehicle_type: 0
     model: ""

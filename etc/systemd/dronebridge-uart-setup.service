@@ -1,5 +1,5 @@
 [Unit]
-Description=DroneBridge MAVLink UART2/UART3 4-wire
+Description=DroneBridge boot setup (MAVLink TELEM UART, clear applied overlay markers)
 DefaultDependencies=no
 After=local-fs.target
 Before=dronebridge.service
@@ -7,7 +7,9 @@ Before=dronebridge.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/bash /opt/dronebridge/setup_mavlink_uart.sh
+# Gọi thẳng cây install/ (thuộc root); không qua symlink trong /opt/dronebridge (thuộc user dịch vụ).
+ExecStart=/bin/bash /opt/dronebridge/install/network/setup_mavlink_uart.sh
+ExecStartPost=-/bin/bash /opt/dronebridge/install/camera/post_boot_clear.sh
 
 [Install]
 WantedBy=multi-user.target

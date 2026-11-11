@@ -18,9 +18,12 @@ TABLE_NAME="dronebridge"
 # install.sh nằm trong <gốc>/install. Gốc là repo hoặc /tmp/dronebridge_staging.
 INSTALL_TREE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 STAGING_DIR="$(cd "$INSTALL_TREE/.." && pwd)"
+# shellcheck source=lib/board.sh
+source "$INSTALL_TREE/lib/board.sh"
 
 echo "===================================================="
 echo "   DroneBridge — Installer"
+echo "   Board:   $(dronebridge_board) (TELEM2 $(dronebridge_telem2_dev), LCD /dev/i2c-$(dronebridge_lcd_bus))"
 echo "   Staging: $STAGING_DIR"
 echo "   Target:  $INSTALL_DIR"
 echo "===================================================="
@@ -48,17 +51,24 @@ run_step() {
 configure_host() {
     local cfg="$INSTALL_DIR/config.yaml"
     local bin_sh="$INSTALL_DIR/install"
+    run_step "Giới hạn log (journald)" bash "$bin_sh/service/setup_journald.sh"
     run_step "PBR" bash "$bin_sh/network/setup_pbr.sh"
     run_step "NetworkManager auto-reconnect" bash "$bin_sh/network/setup_nm_policy.sh"
     run_step "Ethernet PX4" bash "$bin_sh/network/setup_eth.sh" "$cfg"
     run_step "LCD I2C" bash "$bin_sh/network/setup_lcd_i2c.sh" "$cfg"
     run_step "MAVLink UART" bash "$bin_sh/network/setup_mavlink_uart.sh"
     run_step "Camera overlay" bash "$bin_sh/camera/setup_camera.sh" "$cfg"
+    run_step "Quạt (FAN)" bash "$bin_sh/fan/setup_fan.sh"
     run_step "UART boot unit" install_uart_boot_unit "$bin_sh"
-    run_step "Camera sudoers" bash "$bin_sh/camera/install_camera_sudoers.sh" "$RUN_USER"
+    run_step "LCD service" install_lcd_unit
+    if [ -f "$bin_sh/camera/install_camera_sudoers.sh" ]; then
+        run_step "Camera sudoers" bash "$bin_sh/camera/install_camera_sudoers.sh" "$RUN_USER"
+    else
+        echo "▶ Camera sudoers: thiếu install_camera_sudoers.sh trong repo — bỏ qua"
+    fi
     if [ -f "$INSTALL_DIR/.need_camera_reboot" ] || [ -f "$INSTALL_DIR/.need_lcd_reboot" ] || \
        { [ -f "$INSTALL_DIR/.need_host_reboot" ] && [ -s "$INSTALL_DIR/.need_host_reboot" ]; }; then
-        echo "   Boot config đã ghi. Reboot thì kernel mới nhận camera/LCD/UART."
+        echo "   Boot config đã ghi. Reboot thì kernel mới nhận camera/LCD/UART/quạt."
     fi
 }
 
@@ -86,6 +96,20 @@ install_uart_boot_unit() {
     systemctl enable dronebridge-uart-setup.service
 }
 
+install_lcd_unit() {
+    local src="$INSTALL_DIR/etc/systemd/dronebridge-lcd.service" user
+    if [ ! -f "$src" ]; then
+        echo "   thiếu $src"
+        return 1
+    fi
+    user="$(dronebridge_service_user)"
+    user="${user:-$RUN_USER}"
+    sed -e "s/^User=.*/User=${user}/" -e "s/^Group=.*/Group=$(id -gn "$user")/" "$src" \
+        > /etc/systemd/system/dronebridge-lcd.service
+    systemctl daemon-reload
+    systemctl enable dronebridge-lcd.service
+}
+
 check_and_fix() {
     echo "===================================================="
     echo "   DroneBridge — kiểm tra và sửa tại chỗ"
@@ -99,16 +123,22 @@ check_and_fix() {
         echo "FAIL  thiếu $INSTALL_DIR/config.yaml"
         exit 1
     fi
-    if [ ! -x "$INSTALL_DIR/install/network/setup_pbr.sh" ]; then
+    if [ ! -f "$INSTALL_DIR/install/network/setup_pbr.sh" ]; then
         echo "FAIL  thiếu cây $INSTALL_DIR/install — chạy cài đầy đủ trước"
         exit 1
     fi
+    chown -R root:root "$INSTALL_DIR/install"
+    chmod -R go-w "$INSTALL_DIR/install"
+    find "$INSTALL_DIR/install" -name '*.sh' -exec chmod 755 {} \;
+    sed -i "s/^DRONEBRIDGE_USER=\".*\"/DRONEBRIDGE_USER=\"$(dronebridge_service_user)\"/" \
+        "$INSTALL_DIR/install/network/setup_pbr.sh"
     configure_host
     run_step "Bật service" bash -c '
         systemctl enable dronebridge-4g-init.service dronebridge-netmon.service dronebridge.service
         systemctl enable dronebridge-uart-setup.service dronebridge-camera-watch.service 2>/dev/null || true
     '
     run_step "Restart DroneBridge" systemctl restart dronebridge
+    systemctl restart dronebridge-lcd.service 2>/dev/null || true
     echo ""
     if [ "$FAILS" -eq 0 ]; then
         echo "OK  Cấu hình tại chỗ đã khớp."
@@ -178,6 +208,10 @@ if [ -d "$STAGING_DIR/Find_landing" ]; then
         --exclude 'camera_config_1.json' \
         "$STAGING_DIR/Find_landing/" "$INSTALL_DIR/Find_landing/"
 fi
+if [ -d "$STAGING_DIR/lcd_monitor" ]; then
+    mkdir -p "$INSTALL_DIR/lcd_monitor"
+    rsync -a --exclude '__pycache__' "$STAGING_DIR/lcd_monitor/" "$INSTALL_DIR/lcd_monitor/"
+fi
 cp -f  "$STAGING_DIR/Module_4G/enable_4g_auto.py"  "$INSTALL_DIR/Module_4G/"
 cp -f  "$STAGING_DIR/Module_4G/connection_manager.py" "$INSTALL_DIR/Module_4G/"
 cp -f  "$STAGING_DIR/Module_4G/set_4g_mode.py"     "$INSTALL_DIR/Module_4G/"   2>/dev/null || true
@@ -232,29 +266,19 @@ chmod +x "$INSTALL_DIR/dronebridge"
 chmod +x "$INSTALL_DIR/Module_4G/enable_4g_auto.py"
 chmod +x "$INSTALL_DIR/Module_4G/connection_manager.py"
 chmod +x "$INSTALL_DIR/Module_Cellular/modem_init.py" 2>/dev/null || true
-# Ownership: toàn bộ thuộc user dịch vụ, trừ script chạy bằng root / sudo NOPASSWD.
+# Ownership: toàn bộ thuộc user dịch vụ, trừ cây install/ (chạy bằng root / sudo NOPASSWD).
+# Cả cây, không chỉ từng script: script root source install/lib/*.sh và gọi script con,
+# user sửa được các file đó là chạy được lệnh root.
 chown -R "$RUN_USER:$GROUP_NAME" "$INSTALL_DIR"
-for root_script in \
-    install/network/setup_pbr.sh \
-    install/network/setup_nm_policy.sh \
-    install/network/setup_eth.sh \
-    install/network/setup_lcd_i2c.sh \
-    install/network/setup_mavlink_uart.sh \
-    install/camera/setup_camera.sh \
-    install/camera/apply_camera_overlay.sh \
-    install/camera/apply_host_reboot.sh \
-    install/camera/post_boot_clear.sh \
-    install/camera/watch_camera_overlay.sh
-do
-    if [ -f "$INSTALL_DIR/$root_script" ]; then
-        chown root:root "$INSTALL_DIR/$root_script"
-        chmod 755 "$INSTALL_DIR/$root_script"
-    fi
-done
+chown -R root:root "$INSTALL_DIR/install"
+chmod -R go-w "$INSTALL_DIR/install"
 
 # Đồng bộ user chạy service + PBR với user thực tế trên Pi (vd. cm5drone6425)
-sed -i "s/^User=.*/User=${RUN_USER}/" "$INSTALL_DIR/etc/systemd/dronebridge.service"
-sed -i "s/^Group=.*/Group=${GROUP_NAME}/" "$INSTALL_DIR/etc/systemd/dronebridge.service"
+for unit in dronebridge.service dronebridge-lcd.service; do
+    [ -f "$INSTALL_DIR/etc/systemd/$unit" ] || continue
+    sed -i "s/^User=.*/User=${RUN_USER}/" "$INSTALL_DIR/etc/systemd/$unit"
+    sed -i "s/^Group=.*/Group=${GROUP_NAME}/" "$INSTALL_DIR/etc/systemd/$unit"
+done
 sed -i "s/^DRONEBRIDGE_USER=\".*\"/DRONEBRIDGE_USER=\"${RUN_USER}\"/" "$INSTALL_DIR/install/network/setup_pbr.sh"
 
 # ── 4. Cấu hình PBR routing table ────────────────────────────────────────────
@@ -269,7 +293,6 @@ apt-get install -y -q \
     python3-serial \
     libqmi-utils \
     python3-opencv \
-    python3-picamera2 \
     gstreamer1.0-tools \
     gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \
@@ -278,7 +301,18 @@ apt-get install -y -q \
     gstreamer1.0-libav \
     gstreamer1.0-rtsp \
     libx264-dev \
-    ffmpeg
+    ffmpeg \
+    python3-pil \
+    python3-smbus2 \
+    i2c-tools \
+    inotify-tools \
+    rsync
+# python3-picamera2 chỉ có trong repo Raspberry Pi OS.
+if apt-cache policy python3-picamera2 2>/dev/null | grep -q 'Candidate: [0-9]'; then
+    apt-get install -y -q python3-picamera2
+else
+    echo "   ⚠️ Không có python3-picamera2 trong apt (không phải Raspberry Pi OS) — bỏ qua"
+fi
 
 # Tạo file rt_tables nếu chưa có (một số Pi OS minimal không có sẵn)
 RT_TABLES="/etc/iproute2/rt_tables"
@@ -354,6 +388,7 @@ if [ -f "$INSTALL_DIR/install/service/dronebridge-ctl.sh" ]; then
 else
     systemctl restart dronebridge || systemctl start dronebridge || true
 fi
+systemctl restart dronebridge-lcd.service 2>/dev/null || true
 
 # ── Xong ──────────────────────────────────────────────────────────────────────
 echo ""

@@ -1,0 +1,26 @@
+# Đặt tại: /etc/systemd/system/dronebridge-lcd.service
+[Unit]
+Description=DroneBridge LCD SH1107 monitor
+# Bus I2C lấy từ config.yaml lcd.bus (CM5 3, WalnutPi 4). lcd.enabled=false → thoát 0, không restart.
+After=dronebridge-uart-setup.service dronebridge.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/dronebridge/lcd_monitor
+Environment=DRONEBRIDGE_INSTALL_DIR=/opt/dronebridge
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/dronebridge/lcd_monitor/run_lcd_monitor.py
+
+# install.sh thay User=/Group= khi cài
+User=pi
+Group=pi
+
+Restart=on-failure
+RestartSec=30s
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dronebridge-lcd
+
+[Install]
+WantedBy=multi-user.target

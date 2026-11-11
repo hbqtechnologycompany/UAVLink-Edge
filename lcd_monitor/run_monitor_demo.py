@@ -17,6 +17,7 @@ from lcd import (
     collect_cm5,
     collect_live,
     demo_state,
+    default_bus,
     display_image,
     open_display,
 )
@@ -31,7 +32,7 @@ def _stop(*_args) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="SH1107 monitor demo")
-    parser.add_argument("--bus", type=int, default=3)
+    parser.add_argument("--bus", type=int, default=default_bus())
     parser.add_argument("--addr", type=lambda x: int(x, 0), default=0x3C)
     parser.add_argument("--interval", type=float, default=1.0)
     parser.add_argument("--hold", type=float, default=5.0)

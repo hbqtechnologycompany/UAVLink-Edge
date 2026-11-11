@@ -127,8 +127,23 @@ def _gpio_init():
         return False
 
 
+def _is_walnutpi():
+    try:
+        with open("/proc/device-tree/model", "rb") as f:
+            return b"walnutpi" in f.read().lower()
+    except OSError:
+        return False
+
+
+# Số chân là BCM của CM5; trên WalnutPi CM2 gpiochip0 là pinctrl T527 → không điều khiển.
+GPIO_ENABLED = not _is_walnutpi()
+
+
 def gpio_set(line, value):
     """Set GPIO line to value (0 or 1) and giữ trạng thái suốt vòng đời script."""
+    if not GPIO_ENABLED:
+        print(f"  ! Bỏ qua GPIO{line} trên WalnutPi CM2")
+        return False
     if not _gpio_init():
         return False
     try:

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -97,11 +98,18 @@ func SaveSecret(droneUUID, secretKey string) error {
 		return fmt.Errorf("failed to marshal secret data: %w", err)
 	}
 
-	// Write with 0644 permissions (read/write by owner, read by others)
-	// This is CRITICAL because the user runs `--register` with sudo (owner=root)
-	// but the Systemd service runs with User=pi (needs to read).
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
+	// Chỉ chủ file đọc được (0600). `sudo --register` chạy bằng root nhưng service chạy bằng
+	// user dịch vụ: khi là root, trao file cho chủ thư mục cài đặt (vd /opt/dronebridge).
+	if err := os.WriteFile(filePath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write secret file: %w", err)
+	}
+	_ = os.Chmod(filePath, 0600)
+	if os.Geteuid() == 0 {
+		if st, err := os.Stat(filepath.Dir(filePath)); err == nil {
+			if sys, ok := st.Sys().(*syscall.Stat_t); ok {
+				_ = os.Chown(filePath, int(sys.Uid), int(sys.Gid))
+			}
+		}
 	}
 
 	return nil
@@ -113,11 +121,11 @@ func SecretExists() bool {
 	if err != nil {
 		return false
 	}
-	
+
 	if _, err := os.Stat(filePath); err == nil {
 		return true
 	}
-	
+
 	// Check current dir as fallback
 	if _, err := os.Stat(SecretFileName); err == nil {
 		return true
@@ -132,13 +140,13 @@ func DeleteSecret() error {
 	if err != nil {
 		return err
 	}
-	
+
 	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	
+
 	// Also try current dir
 	os.Remove(SecretFileName)
-	
+
 	return nil
 }

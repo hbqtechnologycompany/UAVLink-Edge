@@ -3,6 +3,8 @@ package metrics
 import (
 	"sync"
 	"time"
+
+	"DroneBridge/redact"
 )
 
 // Metrics holds the application state and statistics
@@ -10,10 +12,10 @@ type Metrics struct {
 	mu sync.RWMutex
 
 	// Packet statistics
-	SentPackets      map[string]int64
-	FailedPackets    map[string]int64
-	FailedUnhealthy  map[string]int64 // Failed due to unhealthy state
-	FailedSend       map[string]int64 // Failed due to send error
+	SentPackets     map[string]int64
+	FailedPackets   map[string]int64
+	FailedUnhealthy map[string]int64 // Failed due to unhealthy state
+	FailedSend      map[string]int64 // Failed due to send error
 
 	// System status
 	CurrentIP        string
@@ -23,7 +25,7 @@ type Metrics struct {
 	LastAuth         time.Time
 	LastRefreshOK    time.Time
 	StartTime        time.Time
-	
+
 	// Session info
 	SessionExpiresAt time.Time
 	RefreshInterval  time.Duration
@@ -125,13 +127,13 @@ func (m *Metrics) SetLastRefreshOK(t time.Time) {
 func (m *Metrics) AddLog(level, msg string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	entry := LogEntry{
 		Time:    time.Now(),
 		Level:   level,
-		Message: msg,
+		Message: redact.UUIDs(msg), // RecentLogs hiện trên dashboard
 	}
-	
+
 	// Keep last 100 logs
 	if len(m.RecentLogs) >= 100 {
 		m.RecentLogs = m.RecentLogs[1:]
@@ -171,17 +173,17 @@ func (m *Metrics) GetSnapshot() map[string]interface{} {
 	copy(logsCopy, m.RecentLogs)
 
 	return map[string]interface{}{
-		"sent_packets":      copyInt64Map(m.SentPackets),
-		"failed_packets":    copyInt64Map(m.FailedPackets),
-		"failed_unhealthy":  copyInt64Map(m.FailedUnhealthy),
-		"failed_send":       copyInt64Map(m.FailedSend),
-		"current_ip":          m.CurrentIP,
-		"auth_status":         m.AuthStatus,
-		"server_reachable":    m.ServerReachable,
-		"disconnect_reason":   m.DisconnectReason,
-		"last_auth":           m.LastAuth,
-		"last_refresh_ok":     m.LastRefreshOK,
-		"uptime":            time.Since(m.StartTime).String(),
+		"sent_packets":         copyInt64Map(m.SentPackets),
+		"failed_packets":       copyInt64Map(m.FailedPackets),
+		"failed_unhealthy":     copyInt64Map(m.FailedUnhealthy),
+		"failed_send":          copyInt64Map(m.FailedSend),
+		"current_ip":           m.CurrentIP,
+		"auth_status":          m.AuthStatus,
+		"server_reachable":     m.ServerReachable,
+		"disconnect_reason":    m.DisconnectReason,
+		"last_auth":            m.LastAuth,
+		"last_refresh_ok":      m.LastRefreshOK,
+		"uptime":               time.Since(m.StartTime).String(),
 		"session_expires":      m.SessionExpiresAt,
 		"refresh_interval":     m.RefreshInterval.Seconds(),
 		"udp_raw_in_per_sec":   m.UdpRawInPerSec,

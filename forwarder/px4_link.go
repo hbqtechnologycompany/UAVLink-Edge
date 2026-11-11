@@ -178,11 +178,9 @@ type px4Arbiter struct {
 }
 
 var px4Links = &px4Arbiter{
-	telem2Dev: "/dev/ttyAMA2",
-	telem3Dev: "/dev/ttyAMA3",
-	loss:      2 * time.Second,
-	recoverN:  2,
-	snap:      linkSnap{active: linkEth},
+	loss:     2 * time.Second,
+	recoverN: 2,
+	snap:     linkSnap{active: linkEth},
 }
 
 // uartBaud is the CM5 rate for both TELEM ports. 921600 and 57600 are the old caps.
@@ -194,9 +192,13 @@ func uartBaud(b int) int {
 }
 
 func configurePX4Links(cfg *config.Config) (telem2 string, telem2Baud int, telem3 string, telem3Baud int) {
-	telem2 = "/dev/ttyAMA2"
+	hw := config.ResolveBoardProfile("")
+	if cfg != nil && cfg.Hardware.Name != "" {
+		hw = cfg.Hardware
+	}
+	telem2 = hw.Telem2Port
 	telem2Baud = 1500000
-	telem3 = "/dev/ttyAMA3"
+	telem3 = hw.Telem3Port
 	telem3Baud = 1500000
 	loss := 2 * time.Second
 	recoverN := 2
@@ -209,7 +211,8 @@ func configurePX4Links(cfg *config.Config) (telem2 string, telem2Baud int, telem
 		if cfg.Network.Telem2Baud > 0 {
 			telem2Baud = uartBaud(cfg.Network.Telem2Baud)
 		}
-		if cfg.Network.Telem3Port != "" {
+		// A loaded config already carries the board's TELEM3 ("" = board has none).
+		if cfg.Network.Telem3Port != "" || cfg.Hardware.Name != "" {
 			telem3 = cfg.Network.Telem3Port
 		}
 		if cfg.Network.Telem3Baud > 0 {
@@ -419,7 +422,10 @@ func startPX4LinkSupervisor(node *gomavlib.Node, cfg *config.Config, stop <-chan
 		t3 := px4Links.telem3Dev
 		px4Links.mu.Unlock()
 		web.SetPX4LinkStatus(linkEth.String(), -1)
-		logger.Info("[MAVLINK] Link arbiter: ETH first (loss %s, recover after %d PX4 HEARTBEAT), TELEM2 %s and TELEM3 %s at 1500000 8N1, no hardware flow control. Same Normal stream on all three links. Command TX on one link.",
+		if t3 == "" {
+			t3 = "none"
+		}
+		logger.Info("[MAVLINK] Link arbiter: ETH first (loss %s, recover after %d PX4 HEARTBEAT), TELEM2 %s, TELEM3 %s, 8N1 without hardware flow control. Command TX on one link.",
 			loss, recoverN, t2, t3)
 		go px4Links.watchEthernetBroadcast(cfg, stop)
 		go px4Links.loop(node, stop)

@@ -23,13 +23,15 @@ fi
 if [ -f "$MARKER" ] && grep -q '^uart$' "$MARKER" 2>/dev/null; then
     bash "$SCRIPT_DIR/../network/setup_mavlink_uart.sh" 2>/dev/null || true
 fi
+if [ -f "$MARKER" ] && grep -q '^fan$' "$MARKER" 2>/dev/null; then
+    bash "$SCRIPT_DIR/../fan/setup_fan.sh" 2>/dev/null || true
+fi
 
-LCD_BUS="$(python3 - "$CONFIG" <<'PY' 2>/dev/null || echo 3
-import sys, yaml
-with open(sys.argv[1]) as f:
-    print(int((yaml.safe_load(f) or {}).get("lcd", {}).get("bus", 3)))
-PY
-)"
+# shellcheck source=../lib/board.sh
+source "$SCRIPT_DIR/../lib/board.sh"
+LCD_BUS="$(dronebridge_config_lcd_bus "$CONFIG")"
+TELEM2_DEV="$(dronebridge_telem2_dev)"
+TELEM3_DEV="$(dronebridge_telem3_dev)"
 
 camera_ok=1
 [ -f "$CAM_MARKER" ] && camera_ok=0
@@ -41,10 +43,16 @@ fi
 
 uart_ok=1
 if [ -f "$MARKER" ] && grep -q '^uart$' "$MARKER" 2>/dev/null; then
-    [ -e /dev/ttyAMA2 ] && [ -e /dev/ttyAMA3 ] || uart_ok=0
+    [ -e "$TELEM2_DEV" ] || uart_ok=0
+    [ -z "$TELEM3_DEV" ] || [ -e "$TELEM3_DEV" ] || uart_ok=0
 fi
 
-if [ "$camera_ok" = "1" ] && [ "$lcd_ok" = "1" ] && [ "$uart_ok" = "1" ]; then
+fan_ok=1
+if [ -f "$MARKER" ] && grep -q '^fan$' "$MARKER" 2>/dev/null; then
+    fan_ok=0
+fi
+
+if [ "$camera_ok" = "1" ] && [ "$lcd_ok" = "1" ] && [ "$uart_ok" = "1" ] && [ "$fan_ok" = "1" ]; then
     rm -f "$MARKER" "$CAM_MARKER" "$LCD_MARKER"
     logger -t dronebridge "Post-boot: overlay markers cleared"
 fi
