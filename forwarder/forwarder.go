@@ -1145,6 +1145,15 @@ func (f *Forwarder) receiveAndForward() {
 					if sysID != 255 {
 						web.HandlePreflightEsc(m)
 					}
+				case *common.MessageMissionAck:
+					logger.Info("[MISSION] ACK from Pixhawk — result=%d mission_type=%d target_sys=%d target_comp=%d opaque_id=%d", m.Type, m.MissionType, m.TargetSystem, m.TargetComponent, m.OpaqueId)
+				case *common.MessageMissionItemInt:
+					logger.Info("[MISSION] ITEM_INT from Pixhawk — seq=%d frame=%d command=%d lat=%.7f lon=%.7f alt=%.2f current=%d autocontinue=%d mission_type=%d",
+						m.Seq, m.Frame, m.Command, float64(m.X)/1e7, float64(m.Y)/1e7, m.Z, m.Current, m.Autocontinue, m.MissionType)
+				case *common.MessageMissionCount:
+					logger.Info("[MISSION] COUNT from GCS/Pixhawk — count=%d mission_type=%d", m.Count, m.MissionType)
+				case *common.MessageMissionRequestInt:
+					logger.Info("[MISSION] REQUEST_INT from Pixhawk — seq=%d mission_type=%d", m.Seq, m.MissionType)
 				}
 
 				// Forward message to server
@@ -1272,6 +1281,27 @@ func (f *Forwarder) parseMessageVerbose(msg interface{}, sysID uint8) {
 		logger.Info("[VERBOSE] MISSION_ITEM from server - Seq=%d, Frame=%d, Command=%d, Current=%d, Autocontinue=%d, Params=[%.2f, %.2f, %.2f, %.2f], X=%.7f, Y=%.7f, Z=%.2f",
 			m.Seq, m.Frame, m.Command, m.Current, m.Autocontinue,
 			m.Param1, m.Param2, m.Param3, m.Param4, m.X, m.Y, m.Z)
+
+	case *common.MessageMissionCount:
+		logger.Info("[VERBOSE] MISSION_COUNT from server - TargetSystem=%d, TargetComponent=%d, Count=%d, MissionType=%d",
+			m.TargetSystem, m.TargetComponent, m.Count, m.MissionType)
+
+	case *common.MessageMissionRequest:
+		logger.Info("[VERBOSE] MISSION_REQUEST from server - TargetSystem=%d, TargetComponent=%d, Seq=%d, MissionType=%d",
+			m.TargetSystem, m.TargetComponent, m.Seq, m.MissionType)
+
+	case *common.MessageMissionRequestInt:
+		logger.Info("[VERBOSE] MISSION_REQUEST_INT from server - TargetSystem=%d, TargetComponent=%d, Seq=%d, MissionType=%d",
+			m.TargetSystem, m.TargetComponent, m.Seq, m.MissionType)
+
+	case *common.MessageMissionItemInt:
+		logger.Info("[VERBOSE] MISSION_ITEM_INT from server - Seq=%d, Frame=%d, Command=%d, Current=%d, Autocontinue=%d, Params=[%.2f, %.2f, %.2f, %.2f], X=%d, Y=%d, Z=%.2f, MissionType=%d",
+			m.Seq, m.Frame, m.Command, m.Current, m.Autocontinue,
+			m.Param1, m.Param2, m.Param3, m.Param4, m.X, m.Y, m.Z, m.MissionType)
+
+	case *common.MessageMissionAck:
+		logger.Info("[VERBOSE] MISSION_ACK from server - TargetSystem=%d, TargetComponent=%d, Type=%d, MissionType=%d",
+			m.TargetSystem, m.TargetComponent, m.Type, m.MissionType)
 
 	case *common.MessageParamValue:
 		logger.Info("[VERBOSE] PARAM_VALUE from server - ParamId=%s, ParamValue=%.2f, ParamType=%d, ParamCount=%d, ParamIndex=%d",
